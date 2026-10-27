@@ -73,6 +73,7 @@ export function createProvider(
       baseUrl: c.baseUrl || env.AI_BASE_URL || "",
       model: c.model || env.AI_MODEL || "",
       secret: c.secret,
+      jsonMode: c.jsonMode ?? true,
     };
   }
   function view() {
@@ -82,6 +83,7 @@ export function createProvider(
       baseUrl: c.baseUrl,
       model: c.model,
       hasApiKey: !!(c.secret || env.AI_API_KEY),
+      jsonMode: c.jsonMode,
     };
   }
   function save(b) {
@@ -89,11 +91,22 @@ export function createProvider(
       !b ||
       Object.keys(b).some(
         (k) =>
-          !["enabled", "baseUrl", "model", "apiKey", "clearApiKey"].includes(k),
+          ![
+            "enabled",
+            "baseUrl",
+            "model",
+            "apiKey",
+            "clearApiKey",
+            "jsonMode",
+          ].includes(k),
       )
     )
       throw fail(400, "无效AI配置");
     const c = { ...stored() };
+    if ("jsonMode" in b) {
+      if (typeof b.jsonMode !== "boolean") throw fail(400, "无效JSON模式");
+      c.jsonMode = b.jsonMode;
+    }
     if ("enabled" in b) {
       if (typeof b.enabled !== "boolean") throw fail(400, "无效启用状态");
       c.enabled = b.enabled;
@@ -150,9 +163,12 @@ export function createProvider(
     );
     return view();
   }
-  async function complete(messages, { maxTokens = 1800, json = true } = {}) {
+  async function complete(
+    messages,
+    { maxTokens = 1800, json = true, allowDisabled = false } = {},
+  ) {
     const c = config();
-    if (!c.enabled || !c.baseUrl || !c.model)
+    if ((!c.enabled && !allowDisabled) || !c.baseUrl || !c.model)
       throw fail(503, "驻站AI尚未配置或未启用");
     const token = secret(c);
     if (!token) throw fail(503, "驻站AI尚未配置密钥");
@@ -173,9 +189,10 @@ export function createProvider(
       url.hash
     )
       throw fail(503, "AI地址必须为HTTPS");
-    const endpoint =
-      c.baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") +
-      "/v1/chat/completions";
+    const base = c.baseUrl.replace(/\/$/, "");
+    const endpoint = /\/chat\/completions$/.test(base)
+      ? base
+      : base.replace(/\/v1$/, "") + "/v1/chat/completions";
     let response;
     try {
       response = await fetcher(endpoint, {
@@ -192,15 +209,43 @@ export function createProvider(
           stream: false,
           temperature: 0.55,
           max_tokens: maxTokens,
-          ...(json ? { response_format: { type: "json_object" } } : {}),
+          ...(json && c.jsonMode
+            ? { response_format: { type: "json_object" } }
+            : {}),
         }),
       });
-    } catch {
-      throw fail(502, "AI服务连接失败或超时");
+    } catch (e) {
+      const code = e?.cause?.code || e?.code;
+      const reason =
+        e?.name === "TimeoutError"
+          ? "请求超过60秒"
+          : {
+              ENOTFOUND: "DNS域名解析失败",
+              ECONNREFUSED: "目标拒绝连接",
+              ECONNRESET: "连接被重置",
+              CERT_HAS_EXPIRED: "证书已过期",
+              UNABLE_TO_VERIFY_LEAF_SIGNATURE: "证书链验证失败",
+              DEPTH_ZERO_SELF_SIGNED_CERT: "不受信任的自签名证书",
+              UND_ERR_CONNECT_TIMEOUT: "连接超时",
+            }[code] || "网络连接失败（检查服务器出站、TLS及代理设置）";
+      throw fail(502, "AI服务：" + reason);
     }
     if (!response.ok) {
       response.body?.cancel?.().catch(() => {});
-      throw fail(502, `AI服务请求失败（HTTP ${response.status}）`);
+      const hints = {
+        400: "请求参数不兼容，可尝试关闭强制JSON模式",
+        401: "令牌无效或过期",
+        403: "令牌、模型或来源IP无权限",
+        404: "接口路径或模型不存在，请检查Base URL与模型ID",
+        422: "参数不兼容，可尝试关闭强制JSON模式",
+        429: "配额不足或限流",
+        502: "网关上游失败",
+        503: "网关或模型暂不可用",
+      };
+      throw fail(
+        502,
+        `AI服务请求失败（HTTP ${response.status}）：${hints[response.status] || "请检查网关服务日志"}`,
+      );
     }
     const reader = response.body.getReader();
     let size = 0;
@@ -232,7 +277,12 @@ export function createProvider(
       throw fail(502, "AI未返回文本");
     if (!json) return output;
     try {
-      return JSON.parse(output);
+      return JSON.parse(
+        output
+          .trim()
+          .replace(/^```(?:json)?\s*/i, "")
+          .replace(/\s*```$/, ""),
+      );
     } catch {
       throw fail(502, "AI未返回所需JSON结构");
     }

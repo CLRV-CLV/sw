@@ -4,6 +4,8 @@ interface Role {
   name: string;
   wiki: string;
   kind: string;
+  avatarUrl: string;
+  avatarSource?: string;
   enabled: boolean;
   approved: boolean;
   sourceStatus: string;
@@ -34,6 +36,7 @@ const config = ref({
     baseUrl: "",
     model: "",
     hasApiKey: false,
+    jsonMode: true,
   }),
   apiKey = ref(""),
   roles = ref<Role[]>([]),
@@ -47,6 +50,41 @@ const config = ref({
   dossierText = ref(""),
   customName = ref(""),
   customWiki = ref("");
+const roleSearch = ref(""),
+  checkedRoles = ref<string[]>([]);
+const filteredRoles = computed(() =>
+  roles.value.filter((r) =>
+    (r.name + " " + r.wiki)
+      .toLowerCase()
+      .includes(roleSearch.value.toLowerCase().trim()),
+  ),
+);
+async function batch(action: "delete" | "wiki" | "avatar") {
+  if (!checkedRoles.value.length) return;
+  if (
+    action === "delete" &&
+    !confirm(
+      `删除选中的${checkedRoles.value.length}个角色？保留历史帖子与聊天，自动发现不会恢复这些条目。`,
+    )
+  )
+    return;
+  await act(async () => {
+    const ids = [...checkedRoles.value];
+    await $fetch("/v1/admin/ai/roles/batch", {
+      method: "POST",
+      body: { action, ids, clientId: crypto.randomUUID() },
+    });
+    if (action === "delete" && ids.includes(selected.value))
+      selected.value = "";
+    checkedRoles.value = [];
+    notice.value =
+      action === "delete"
+        ? `已删除${ids.length}个角色`
+        : `已为选中${ids.length}个角色加入${action === "wiki" ? "Wiki导入" : "头像更新"}任务，结果自动刷新。`;
+  });
+}
+const editAvatar = ref("");
+const skipForeignNames = ref(true);
 const sourceText = ref(""),
   editWiki = ref(""),
   editName = ref("");
@@ -68,6 +106,7 @@ const kindNames: Record<string, string> = {
   catalog: "角色发现",
   article: "文章写作",
   connection: "连接测试",
+  avatar: "Wiki头像",
 };
 const connection = computed(() =>
   jobs.value.find((j) => j.id === connectionJob.value),
@@ -76,7 +115,10 @@ async function testConnection() {
   await act(async () => {
     const j = await $fetch<Job>("/v1/admin/ai/test", {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
     });
     connectionJob.value = j.id;
     connectionStarted.value = Date.now();
@@ -197,6 +239,7 @@ async function saveConfig() {
         enabled: config.value.enabled,
         baseUrl: config.value.baseUrl,
         model: config.value.model,
+        jsonMode: config.value.jsonMode,
         ...(apiKey.value ? { apiKey: apiKey.value } : {}),
       },
     });
@@ -209,7 +252,10 @@ async function task(kind: "wiki" | "dossier") {
   await act(async () => {
     await $fetch(`/v1/admin/ai/roles/${selected.value}/${kind}`, {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
     });
     notice.value = "任务已加入队列，下方会自动刷新进度和成功/失败结果。";
   });
@@ -230,11 +276,35 @@ async function saveDossier() {
     error.value = "档案必须是有效JSON";
   }
 }
+async function avatars() {
+  await act(async () => {
+    await $fetch("/v1/admin/ai/avatar-sync", {
+      method: "POST",
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
+    });
+    notice.value = "Wiki头像更新已入队，不会清除档案或覆盖手动头像。";
+  });
+}
+async function refreshAvatar() {
+  if (!current.value) return;
+  await act(async () => {
+    await $fetch(`/v1/admin/ai/roles/${selected.value}/avatar`, {
+      method: "POST",
+      body: { clientId: crypto.randomUUID() },
+    });
+  });
+}
 async function catalog() {
   await act(async () => {
     await $fetch("/v1/admin/ai/catalog-sync", {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
     });
     notice.value =
       "Wiki角色/NPC目录发现任务已入队；新发现项保持停用，资料仍需导入、生成与审核。";
@@ -250,7 +320,10 @@ async function dossiers() {
   await act(async () => {
     const r = await $fetch<{ remaining: number }>("/v1/admin/ai/dossier-sync", {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
     });
     notice.value = `批量档案生成已入队，后续批次剩余${r.remaining}个。`;
   });
@@ -265,7 +338,10 @@ async function syncAll() {
   await act(async () => {
     await $fetch("/v1/admin/ai/wiki-sync", {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: {
+        clientId: crypto.randomUUID(),
+        skipForeignNames: skipForeignNames.value,
+      },
     });
     notice.value =
       "批量Wiki导入已入队。抓取受Wiki可用性影响，失败会保留旧档案。";
@@ -294,7 +370,14 @@ async function add() {
     customWiki.value = "";
   });
 }
+watch(
+  () => current.value?.avatarUrl,
+  (next, previous) => {
+    if (editAvatar.value === (previous || "")) editAvatar.value = next || "";
+  },
+);
 watch(selected, () => {
+  editAvatar.value = current.value?.avatarUrl || "";
   sourceText.value = "";
   editWiki.value = current.value?.wiki || "";
   editName.value = current.value?.name || "";
@@ -345,6 +428,12 @@ onBeforeUnmount(() => {
             type="password"
             autocomplete="new-password"
             maxlength="512" /></label
+        ><label
+          ><input
+            v-model="config.jsonMode"
+            type="checkbox"
+          />强制JSON模式（模型不支持 response_format
+          时关闭；仍会校验输出JSON）</label
         ><button :disabled="busy">保存New API配置</button>
       </form>
       <button :disabled="busy" @click="testConnection">
@@ -367,12 +456,75 @@ onBeforeUnmount(() => {
     </article>
     <article>
       <h2>驻站角色资料与审核</h2>
+      <label
+        ><input
+          type="checkbox"
+          v-model="skipForeignNames"
+        />发现与批量导入时跳过没有中文名的角色（关闭可包含外语名；单角色仍可自由管理）</label
+      >
+      <details class="role-catalog">
+        <summary>展开全部角色管理 · {{ roles.length }} 项</summary>
+        <label
+          >搜索角色名或Wiki标题<input
+            v-model="roleSearch"
+            type="search"
+            placeholder="输入中文名或英文标题"
+        /></label>
+        <button
+          :disabled="busy"
+          @click="checkedRoles = filteredRoles.slice(0, 100).map((r) => r.id)"
+        >
+          选择搜索结果（最多100项）</button
+        ><button :disabled="busy" @click="checkedRoles = []">清除选择</button>
+        <p>
+          已选
+          {{
+            checkedRoles.length
+          }}
+          项。此处显示全部目录，外语名跳过设置仅作用于自动发现与全目录批量任务。
+        </p>
+        <div class="role-catalog-list">
+          <label v-for="r in filteredRoles" :key="r.id"
+            ><input
+              v-model="checkedRoles"
+              type="checkbox"
+              :value="r.id"
+              :disabled="
+                busy ||
+                (!checkedRoles.includes(r.id) && checkedRoles.length >= 100)
+              "
+            /><button type="button" :disabled="busy" @click="selected = r.id">
+              {{ r.name }}</button
+            ><span
+              >{{ r.wiki }} · {{ r.enabled ? "启用" : "停用" }} ·
+              {{ r.sourceStatus }}</span
+            ></label
+          >
+        </div>
+        <button :disabled="busy || !checkedRoles.length" @click="batch('wiki')">
+          导入选中角色Wiki</button
+        ><button
+          :disabled="busy || !checkedRoles.length"
+          @click="batch('avatar')"
+        >
+          更新选中角色头像</button
+        ><button
+          class="danger"
+          :disabled="busy || !checkedRoles.length"
+          @click="batch('delete')"
+        >
+          删除选中角色
+        </button>
+      </details>
       <button :disabled="busy" @click="dedupe">清理不同语言的重复目录项</button>
       <p>
         流程：导入Wiki → 生成详细档案 → 核对来源与档案 → 审核 →
         启用。未核实角色不会自动上线。Wiki/模型内容是不可信资料，不赋予执行权限。防套话是多层防护，不承诺绝对防逆向。
       </p>
-      <button :disabled="busy" @click="catalog">从Wiki发现角色 / NPC目录</button
+      <button :disabled="busy" @click="avatars">
+        批量更新Wiki头像（不重置档案）</button
+      ><button :disabled="busy" @click="catalog">
+        从Wiki发现角色 / NPC目录</button
       ><button :disabled="busy" @click="syncAll">批量导入全部角色Wiki</button
       ><button :disabled="busy" @click="dossiers">
         批量生成详细档案（消耗模型额度）</button
@@ -392,7 +544,41 @@ onBeforeUnmount(() => {
         ><button class="danger" :disabled="busy" @click="removeRole(false)">
           删除此角色
         </button>
-        <label>显示名<input v-model="editName" maxlength="60" /></label
+        <ImageUploadInput
+          :key="current.id"
+          v-model="editAvatar"
+          label="角色头像"
+          :disabled="busy"
+        />
+        <button :disabled="busy" @click="patch({ avatarUrl: editAvatar })">
+          保存角色头像
+        </button>
+        <p>
+          头像来源：{{
+            current.avatarSource === "manual"
+              ? "手动设置，Wiki导入不覆盖"
+              : "Wiki自动获取"
+          }}
+          ·
+          <a
+            :href="
+              'https://zenless-zone-zero.fandom.com/wiki/' +
+              encodeURIComponent(current.wiki)
+            "
+            target="_blank"
+            rel="noopener noreferrer"
+            >角色Wiki图片来源</a
+          >
+        </p>
+        <button :disabled="busy" @click="patch({ avatarSource: 'wiki' })">
+          恢复Wiki自动头像（随后点击获取）
+        </button>
+        <button
+          :disabled="busy || current.avatarSource === 'manual'"
+          @click="refreshAvatar"
+        >
+          获取此角色Wiki头像</button
+        ><label>显示名<input v-model="editName" maxlength="60" /></label
         ><label
           >Wiki页面标题（修正后需要重新导入/生成/审核）<input
             v-model="editWiki"
@@ -628,5 +814,38 @@ onBeforeUnmount(() => {
 }
 [role="alert"] {
   color: #ffba9e;
+}
+.role-catalog {
+  padding: 15px;
+  border: 1px solid #536043;
+  border-radius: 12px;
+  margin: 12px 0;
+}
+.role-catalog summary {
+  cursor: pointer;
+  color: #d7fa00;
+}
+.role-catalog-list {
+  max-height: 340px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.role-catalog-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #39452e;
+  padding: 7px;
+  margin: 0;
+}
+.role-catalog-list input[type="checkbox"] {
+  display: inline-block;
+  width: 18px;
+  flex-shrink: 0;
+}
+.role-catalog-list span {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  color: #a2ac96;
 }
 </style>

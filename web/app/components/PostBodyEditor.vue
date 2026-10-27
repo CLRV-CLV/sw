@@ -6,6 +6,10 @@ const mode = ref<'source'|'rich'|'preview'>('source');
 const rich = ref<HTMLDivElement>();
 const preview = computed(() => formatBodyText(props.modelValue));
 const help = ref(false);
+let savedRange:Range|null=null;
+function rememberSelection(){const selection=window.getSelection();savedRange=selection?.rangeCount&&rich.value?.contains(selection.anchorNode)?selection.getRangeAt(0).cloneRange():null;}
+function uploadedImage(url:string){const image=document.createElement('img');image.src=url;image.alt='帖子图片';const html=sanitizeBodyHtml(image.outerHTML);if(mode.value==='rich'){rich.value?.focus();if(savedRange&&rich.value?.contains(savedRange.startContainer)){const sel=window.getSelection();sel?.removeAllRanges();sel?.addRange(savedRange);}command('insertHTML',html);}else emit('update:modelValue',props.modelValue+'\n'+html+'\n');}
+
 const controls = [
   ['bold','B','加粗'], ['italic','I','斜体'], ['underline','U','下划线'], ['strikeThrough','S','删除线'],
   ['insertUnorderedList','• 列表','无序列表'], ['insertOrderedList','1. 列表','有序列表'],
@@ -47,9 +51,10 @@ function paste(event: ClipboardEvent) {
       <button type="button" :aria-pressed="mode==='source'" @click="selectMode('source')">Markdown / HTML</button>
       <button type="button" :aria-pressed="mode==='rich'" @click="selectMode('rich')">富文本编辑</button>
       <button type="button" :aria-pressed="mode==='preview'" @click="selectMode('preview')">效果预览</button>
+      <span @mousedown.prevent="rememberSelection"><ImageUploadInput label="正文图片" compact @uploaded="uploadedImage" /></span>
       <button type="button" class="help" :aria-expanded="help" @click="help=!help">语法说明</button>
     </div>
-    <p v-if="help" class="post-body-editor__help">支持标题、列表、引用、表格、代码高亮、任务列表、脚注、删除线、==高亮==、H~2~O、x^2^、$公式$ 和 $$块公式$$。可混排安全 HTML。富文本编辑后以 HTML 源码保存；切换模式不会自动还原成原始 Markdown。暂不支持脚本、iframe、任意 CSS 或附件上传。</p>
+    <p v-if="help" class="post-body-editor__help">支持标题、列表、引用、表格、代码高亮、任务列表、脚注、删除线、==高亮==、H~2~O、x^2^、$公式$ 和 $$块公式$$。可混排安全 HTML。富文本编辑后以 HTML 源码保存；切换模式不会自动还原成原始 Markdown。支持图片上传；不支持脚本、iframe、任意 CSS 或非图片附件。</p>
     <template v-if="mode==='rich'">
       <div class="post-body-editor__tools" role="group" aria-label="富文本工具栏">
         <button v-for="[name,label,title] in controls" :key="name" type="button" :title="title" :aria-label="title" @mousedown.prevent @click="command(name!)">{{ label }}</button>

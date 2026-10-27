@@ -8,7 +8,12 @@ import { createAdmin } from "./admin.mjs";
 import { createProvider } from "./ai/provider.mjs";
 import { dossierFields, refusal } from "./ai/policy.mjs";
 import { roster } from "./ai/roster.mjs";
-import { cleanWiki, fetchWiki, discoverWikiCharacters } from "./ai/wiki.mjs";
+import {
+  cleanWiki,
+  fetchWiki,
+  discoverWikiCharacters,
+  wikiPortrait,
+} from "./ai/wiki.mjs";
 const dossier = Object.fromEntries(
   dossierFields.map((k) => [
     k,
@@ -60,7 +65,7 @@ function fixture(env = {}) {
       parse: {
         revid: 123,
         text: {
-          "*": `<h2>Agent Intel</h2><p>${"Ellen is a Victoria Housekeeping maid and a student in New Eridu. She carries lollipops and values her companions. ".repeat(18)}</p>`,
+          "*": `<img class="pi-image-thumbnail" src="https://static.wikia.nocookie.net/zzz/images/f/ff/Test.png"><h2>Agent Intel</h2><p>${"Ellen is a Victoria Housekeeping maid and a student in New Eridu. She carries lollipops and values her companions. ".repeat(18)}</p>`,
         },
       },
     });
@@ -639,6 +644,153 @@ test("admin connection test reports actual protocol success; multilingual duplic
     } finally {
       restarted.close();
     }
+  } finally {
+    f.close();
+  }
+});
+
+test("provider accepts full endpoint, optional response_format and fenced JSON without leaking upstream errors", async () => {
+  const db = new DatabaseSync(":memory:"),
+    dir = mkdtempSync(tmpdir() + "/ik-provider-compat-");
+  let status = 200,
+    code = "",
+    last;
+  const p = createProvider(db, {
+    dataDir: dir,
+    fetcher: async (url, opts) => {
+      last = { url, body: JSON.parse(opts.body) };
+      if (code) throw { cause: { code } };
+      return Response.json(
+        status === 200
+          ? { choices: [{ message: { content: '```json\n{"ok":true}\n```' } }] }
+          : { error: { message: "secret-upstream-key" } },
+        { status },
+      );
+    },
+  });
+  try {
+    p.save({
+      enabled: true,
+      baseUrl: "https://gateway.example/v1/chat/completions",
+      apiKey: "sk-secret",
+      model: "m",
+      jsonMode: false,
+    });
+    assert.deepEqual(await p.complete([{ role: "user", content: "JSON" }]), {
+      ok: true,
+    });
+    assert.equal(last.url, "https://gateway.example/v1/chat/completions");
+    assert.equal("response_format" in last.body, false);
+    p.save({ jsonMode: true });
+    await p.complete([{ role: "user", content: "JSON" }]);
+    assert.equal(last.body.response_format.type, "json_object");
+    status = 401;
+    await assert.rejects(
+      p.complete([]),
+      (e) => /HTTP 401.*令牌/.test(e.message) && !e.message.includes("secret"),
+    );
+    status = 200;
+    code = "ENOTFOUND";
+    await assert.rejects(p.complete([]), /DNS/);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+test("Wiki portrait accepts infobox image only from trusted raster CDN, not page icons or executable URLs", () => {
+  assert.equal(
+    wikiPortrait(
+      '<img src="https://evil.test/a.png"><img class="pi-image-thumbnail" data-src="https://static.wikia.nocookie.net/zzz/images/a/a1/Ellen.png?x=1&amp;y=2">',
+    ),
+    "https://static.wikia.nocookie.net/zzz/images/a/a1/Ellen.png?x=1&y=2",
+  );
+  assert.equal(
+    wikiPortrait('<img class="pi-image-thumbnail" src="javascript:alert(1)">'),
+    "",
+  );
+});
+
+test("automatic Wiki avatars preserve manual overrides; separate refresh keeps approval; batches can skip foreign-only names", async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    const manual = "/images/default-avatar.webp";
+    await f.call("admin", "/v1/admin/ai/roles/ellen-joe", "PATCH", {
+      avatarUrl: manual,
+    });
+    const refreshed = await f.wait(
+      await f.call("admin", "/v1/admin/ai/roles/ellen-joe/avatar", "POST", {
+        clientId: "avatar-manual",
+      }),
+    );
+    assert.equal(refreshed.state, "failed");
+    assert.equal(
+      (await f.call("admin", "/v1/admin/ai/roles")).items.find(
+        (r) => r.id === "ellen-joe",
+      ).avatarUrl,
+      manual,
+    );
+    await f.call("admin", "/v1/admin/ai/roles/ellen-joe", "PATCH", {
+      avatarSource: "wiki",
+    });
+    const wiki = await f.wait(
+      await f.call("admin", "/v1/admin/ai/roles/ellen-joe/avatar", "POST", {
+        clientId: "avatar-wiki",
+      }),
+    );
+    assert.equal(wiki.state, "done");
+    const role = (await f.call("admin", "/v1/admin/ai/roles")).items.find(
+      (r) => r.id === "ellen-joe",
+    );
+    assert.match(role.avatarUrl, /static.wikia.nocookie.net/);
+    assert.equal(role.approved, true);
+    assert.equal(role.enabled, true);
+    assert.match(f.ai.author("ai:ellen-joe").avatarUrl, /static.wikia/);
+    const batch = await f.call("admin", "/v1/admin/ai/avatar-sync", "POST", {
+      clientId: "zh-batch",
+    });
+    assert.ok(!batch.items.some((j) => j.roleId === "kafka"));
+    await f.wait(batch.items.at(-1));
+    const all = await f.call("admin", "/v1/admin/ai/avatar-sync", "POST", {
+      clientId: "all-batch",
+      skipForeignNames: false,
+    });
+    assert.ok(all.items.some((j) => j.roleId === "kafka"));
+    await f.wait(all.items.at(-1));
+  } finally {
+    f.close();
+  }
+});
+
+test("bulk role manager validates all IDs before deleting and preserves tombstones", async () => {
+  const f = fixture();
+  try {
+    await assert.rejects(
+      f.call("alice", "/v1/admin/ai/roles/batch", "POST", {
+        action: "delete",
+        ids: ["billy-kid"],
+      }),
+      { status: 403 },
+    );
+    await assert.rejects(
+      f.call("admin", "/v1/admin/ai/roles/batch", "POST", {
+        action: "delete",
+        ids: ["billy-kid", "nonexistent"],
+      }),
+      { status: 404 },
+    );
+    assert.ok(
+      (await f.call("admin", "/v1/admin/ai/roles")).items.some(
+        (r) => r.id === "billy-kid",
+      ),
+    );
+    const result = await f.call("admin", "/v1/admin/ai/roles/batch", "POST", {
+      action: "delete",
+      ids: ["billy-kid", "kafka"],
+    });
+    assert.equal(result.items.length, 2);
+    const remaining = (await f.call("admin", "/v1/admin/ai/roles")).items;
+    assert.ok(!remaining.some((r) => ["billy-kid", "kafka"].includes(r.id)));
   } finally {
     f.close();
   }

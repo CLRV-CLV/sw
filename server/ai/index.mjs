@@ -69,6 +69,26 @@ export function createResidentAI(
     db
       .prepare("UPDATE ai_roles SET data=? WHERE id=?")
       .run(JSON.stringify(r), r.id);
+  function removeRecord(r, deleting, actor) {
+    save({
+      ...r,
+      ...(deleting ? { deleted: true } : {}),
+      enabled: false,
+      approved: false,
+      dossier: null,
+      sources: [],
+      sourceText: "",
+      sourceStatus: "pending",
+      version: r.version + 1,
+    });
+    db.prepare(
+      "UPDATE ai_jobs SET state='failed',data=? WHERE roleId=? AND state='queued'",
+    ).run(
+      JSON.stringify({ error: deleting ? "角色已删除" : "Wiki资料已清空" }),
+      r.id,
+    );
+    audit(actor.id, deleting ? "ai.role.delete" : "ai.wiki.clear", r.id);
+  }
   const list = () =>
     db
       .prepare("SELECT json_remove(data,'$.sourceText') data FROM ai_roles")
@@ -211,7 +231,7 @@ export function createResidentAI(
           },
           { role: "user", content: "test" },
         ],
-        { maxTokens: 64 },
+        { maxTokens: 64, allowDisabled: true },
       );
       if (result?.ok !== true)
         throw fail(502, "网关已响应，但模型未通过JSON协议测试");
@@ -224,6 +244,15 @@ export function createResidentAI(
       let added = 0;
       transaction(() => {
         for (const item of discovered.items) {
+          const known = roster.find(
+            (r) => wikiIdentity(r.wiki) === wikiIdentity(item.wiki),
+          );
+          if (known) item.name = known.name;
+          if (
+            data.skipForeignNames !== false &&
+            !/[\p{Script=Han}]/u.test(item.name)
+          )
+            continue;
           if (
             list().some((r) => wikiIdentity(r.wiki) === wikiIdentity(item.wiki))
           )
@@ -264,6 +293,25 @@ export function createResidentAI(
       });
       return { added, truncated: discovered.truncated };
     }
+    if (job.kind === "avatar") {
+      const r = get(job.roleId);
+      const source = await fetchWiki(r, {
+        fetcher: wikiFetcher,
+        portraitOnly: true,
+      });
+      canRun(job);
+      const latest = get(r.id);
+      if (latest.version !== r.version || latest.avatarSource === "manual")
+        throw fail(409, "角色已修改或已设置手动头像，未覆盖");
+      save({
+        ...latest,
+        avatarUrl: source.avatarUrl,
+        avatarSource: "wiki",
+        version: latest.version + 1,
+      });
+      audit(job.userId, "ai.avatar.import", r.id);
+      return { avatarImported: true, avatarUrl: source.avatarUrl };
+    }
     if (job.kind === "wiki") {
       const r = get(job.roleId),
         version = r.version,
@@ -274,6 +322,10 @@ export function createResidentAI(
       save({
         ...latest,
         sourceText: source.text,
+        avatarUrl:
+          latest.avatarSource === "manual"
+            ? latest.avatarUrl
+            : source.avatarUrl || latest.avatarUrl,
         sources: source.sources,
         sourceStatus: "imported",
         approved: false,
@@ -286,6 +338,7 @@ export function createResidentAI(
         imported: true,
         roleId: r.id,
         sourceCount: source.sources.length,
+        avatarImported: !!source.avatarUrl,
       };
     }
     if (job.kind === "dossier") {
@@ -450,7 +503,7 @@ export function createResidentAI(
       b.clientId.length > 100
     )
       throw fail(400, "需要客户端任务标识");
-    if (["wiki", "dossier", "catalog", "connection"].includes(kind)) {
+    if (["wiki", "dossier", "catalog", "connection", "avatar"].includes(kind)) {
       const pending = db
         .prepare(
           "SELECT * FROM ai_jobs WHERE kind=? AND roleId=? AND userId=? AND state IN ('queued','running') LIMIT 1",
@@ -514,7 +567,11 @@ export function createResidentAI(
       kind,
       rid,
       b.clientId,
-      JSON.stringify({ input: b.content, command: b.command }),
+      JSON.stringify({
+        input: b.content,
+        command: b.command,
+        skipForeignNames: b.skipForeignNames !== false,
+      }),
       new Date().toISOString(),
     );
     queueMicrotask(() => drain());
@@ -666,7 +723,12 @@ export function createResidentAI(
       reply(enqueue(actor, "catalog", "catalog", b), 202);
       return true;
     }
-    if (path === "/v1/admin/ai/wiki-sync" && method === "POST") {
+    if (
+      ["/v1/admin/ai/wiki-sync", "/v1/admin/ai/avatar-sync"].includes(path) &&
+      method === "POST"
+    ) {
+      const portrait = path.endsWith("avatar-sync"),
+        kind = portrait ? "avatar" : "wiki";
       const b = await body(req);
       if (
         typeof b.clientId !== "string" ||
@@ -676,12 +738,15 @@ export function createResidentAI(
         throw fail(400, "无效批量标识");
       const roles = list().filter(
         (r) =>
-          r.sourceStatus !== "imported" &&
+          (b.skipForeignNames === false || /[\p{Script=Han}]/u.test(r.name)) &&
+          (portrait
+            ? r.avatarSource !== "manual"
+            : r.sourceStatus !== "imported") &&
           !db
             .prepare(
-              "SELECT 1 FROM ai_jobs WHERE roleId=? AND kind='wiki' AND state IN ('queued','running')",
+              "SELECT 1 FROM ai_jobs WHERE roleId=? AND kind=? AND state IN ('queued','running')",
             )
-            .get(r.id),
+            .get(r.id, kind),
       );
       const room =
         100 -
@@ -694,7 +759,7 @@ export function createResidentAI(
       reply(
         {
           items: roles.slice(0, room).map((r) =>
-            enqueue(actor, "wiki", r.id, {
+            enqueue(actor, kind, r.id, {
               clientId: `${b.clientId}:${r.id}`,
             }),
           ),
@@ -714,6 +779,7 @@ export function createResidentAI(
         throw fail(400, "无效批量任务标识");
       const roles = list().filter(
         (r) =>
+          (b.skipForeignNames === false || /[\p{Script=Han}]/u.test(r.name)) &&
           r.sourceStatus === "imported" &&
           !r.dossier &&
           !db
@@ -802,32 +868,48 @@ export function createResidentAI(
       });
       return true;
     }
+    if (path === "/v1/admin/ai/roles/batch" && method === "POST") {
+      const b = await body(req);
+      if (
+        !["delete", "wiki", "avatar"].includes(b.action) ||
+        !Array.isArray(b.ids) ||
+        !b.ids.length ||
+        b.ids.length > 100 ||
+        b.ids.some((id) => typeof id !== "string") ||
+        new Set(b.ids).size !== b.ids.length
+      )
+        throw fail(400, "请选择1至100个不同角色与有效操作");
+      if (
+        b.action !== "delete" &&
+        (typeof b.clientId !== "string" ||
+          !b.clientId ||
+          b.clientId.length > 36)
+      )
+        throw fail(400, "无效批量标识");
+      const records = b.ids.map(get);
+      const items = transaction(() =>
+        records.map((r) => {
+          if (b.action === "delete") {
+            removeRecord(r, true, actor);
+            return { id: r.id, deleted: true };
+          }
+          return enqueue(actor, b.action, r.id, {
+            clientId: `${b.clientId}:${r.id}`,
+          });
+        }),
+      );
+      reply({ items }, b.action === "delete" ? 200 : 202);
+      return true;
+    }
     const manage = path.match(
-      /^\/v1\/admin\/ai\/roles\/([^/]+)(?:\/(wiki|dossier|wiki-text))?$/,
+      /^\/v1\/admin\/ai\/roles\/([^/]+)(?:\/(wiki|dossier|wiki-text|avatar))?$/,
     );
     if (manage) {
       const rid = decodeURIComponent(manage[1]),
         r = get(rid);
       if (method === "DELETE" && (!manage[2] || manage[2] === "wiki")) {
         const deleting = !manage[2];
-        save({
-          ...r,
-          ...(deleting ? { deleted: true } : {}),
-          enabled: false,
-          approved: false,
-          dossier: null,
-          sources: [],
-          sourceText: "",
-          sourceStatus: "pending",
-          version: r.version + 1,
-        });
-        db.prepare(
-          "UPDATE ai_jobs SET state='failed',data=? WHERE roleId=? AND state='queued'",
-        ).run(
-          JSON.stringify({ error: deleting ? "角色已删除" : "Wiki资料已清空" }),
-          rid,
-        );
-        audit(actor.id, deleting ? "ai.role.delete" : "ai.wiki.clear", rid);
+        removeRecord(r, deleting, actor);
         reply({ ok: true });
         return true;
       }
@@ -883,6 +965,7 @@ export function createResidentAI(
                 "approved",
                 "dossier",
                 "avatarUrl",
+                "avatarSource",
                 "wiki",
                 "name",
               ].includes(k),
@@ -890,6 +973,8 @@ export function createResidentAI(
           ("enabled" in b && typeof b.enabled !== "boolean") ||
           ("approved" in b && typeof b.approved !== "boolean") ||
           ("avatarUrl" in b && !safeImage(b.avatarUrl)) ||
+          ("avatarSource" in b &&
+            !["wiki", "manual"].includes(b.avatarSource)) ||
           ("dossier" in b && !validDossier(b.dossier))
         )
           throw fail(400, "无效角色设置/详细档案");
@@ -905,7 +990,24 @@ export function createResidentAI(
               b.name.length > 60))
         )
           throw fail(400, "无效角色名称/Wiki标题");
-        const next = { ...r, ...b, version: r.version + 1 };
+        if (
+          ("wiki" in b || "name" in b) &&
+          list().some(
+            (x) =>
+              x.id !== rid &&
+              (("wiki" in b && wikiIdentity(x.wiki) === wikiIdentity(b.wiki)) ||
+                ("name" in b && wikiIdentity(x.name) === wikiIdentity(b.name))),
+          )
+        )
+          throw fail(409, "此角色名称或Wiki已被其他目录项使用");
+        const next = {
+          ...r,
+          ...b,
+          ...("avatarUrl" in b && !("avatarSource" in b)
+            ? { avatarSource: "manual" }
+            : {}),
+          version: r.version + 1,
+        };
         if ("wiki" in b && b.wiki !== r.wiki) {
           next.sourceText = "";
           next.sources = [];
@@ -930,7 +1032,10 @@ export function createResidentAI(
         reply(view);
         return true;
       }
-      if (method === "POST" && ["wiki", "dossier"].includes(manage[2])) {
+      if (
+        method === "POST" &&
+        ["wiki", "dossier", "avatar"].includes(manage[2])
+      ) {
         const b = await body(req);
         reply(enqueue(actor, manage[2], rid, b), 202);
         return true;
@@ -984,7 +1089,11 @@ export function createResidentAI(
           .get(id.slice(3));
         if (!row) return null;
         const r = JSON.parse(row.data);
-        return { id, username: `${r.name}（AI）` };
+        return {
+          id,
+          username: `${r.name}（AI）`,
+          avatarUrl: r.avatarUrl || "",
+        };
       } catch {
         return null;
       }

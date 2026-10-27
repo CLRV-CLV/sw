@@ -22,15 +22,40 @@ export function cleanWiki(html) {
     .replace(/\n\s*\n/g, "\n")
     .trim();
 }
-export async function fetchWiki(role, { fetcher = fetch } = {}) {
-  const sources = [];
-  let text = "";
+export function wikiPortrait(html) {
+  for (const tag of html.match(/<img\b[^>]*>/gi) || []) {
+    if (!/pi-image-thumbnail/i.test(tag)) continue;
+    const match =
+      tag.match(/data-src=["']([^"']+)["']/i) ||
+      tag.match(/src=["']([^"']+)["']/i);
+    try {
+      const u = new URL((match?.[1] || "").replace(/&amp;/g, "&"));
+      if (
+        u.protocol === "https:" &&
+        u.hostname === "static.wikia.nocookie.net" &&
+        !u.username &&
+        !u.password
+      )
+        return u.href;
+    } catch {}
+  }
+  return "";
+}
+export async function fetchWiki(
+  role,
+  { fetcher = fetch, portraitOnly = false } = {},
+) {
+  const sources = [],
+    failures = [];
+  let text = "",
+    avatarUrl = "";
   for (const [page, budget] of [
     [role.wiki, 12000],
     [`${role.wiki}/Lore`, 36000],
     [`${role.wiki}/Voice-Overs`, 18000],
     [`${role.wiki}/DMs`, 12000],
   ]) {
+    if (portraitOnly && page !== role.wiki) continue;
     const url = new URL("/api.php", wikiOrigin);
     url.search = new URLSearchParams({
       action: "parse",
@@ -49,10 +74,19 @@ export async function fetchWiki(role, { fetcher = fetch } = {}) {
             "InterKnotResidentAI/1.0 (wiki source import; administrator initiated)",
         },
       });
-    } catch {
+    } catch (e) {
+      const code = e?.cause?.code;
+      failures.push(
+        e?.name === "TimeoutError"
+          ? "请求超时"
+          : code === "ENOTFOUND"
+            ? "DNS解析失败"
+            : "TLS或网络连接失败",
+      );
       continue;
     }
     if (!response.ok) {
+      failures.push(`HTTP ${response.status}`);
       response.body?.cancel?.().catch(() => {});
       continue;
     }
@@ -80,6 +114,12 @@ export async function fetchWiki(role, { fetcher = fetch } = {}) {
       continue;
     }
     if (!data.parse?.text?.["*"]) continue;
+    if (portraitOnly) {
+      const avatarUrl = wikiPortrait(data.parse.text["*"]);
+      if (!avatarUrl) throw fail("Wiki主页面未提供可识别角色图，保留原头像");
+      return { avatarUrl };
+    }
+    if (page === role.wiki) avatarUrl = wikiPortrait(data.parse.text["*"]);
     const cleaned = cleanWiki(data.parse.text["*"]);
     if (cleaned.length < 200) continue;
     const hash = createHash("sha256").update(cleaned).digest("hex");
@@ -94,8 +134,10 @@ export async function fetchWiki(role, { fetcher = fetch } = {}) {
     text += `\nSOURCE ${page}\n${cleaned.slice(0, budget)}\n`;
   }
   if (!sources.length || text.length < 800)
-    throw fail("未能取得足够的Wiki资料；保留原档案，未启用角色");
-  return { text: text.slice(0, 90000), sources };
+    throw fail(
+      `未能取得足够的Wiki资料（${[...new Set(failures)].join("、") || "页面缺失或正文不足"}）；保留原档案，未启用角色`,
+    );
+  return { text: text.slice(0, 90000), sources, avatarUrl };
 }
 
 // Fixed MediaWiki endpoint and categories only. Never fetch a client-supplied URL.

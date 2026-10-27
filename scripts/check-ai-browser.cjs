@@ -12,6 +12,11 @@ const fs = require("node:fs"),
     base = "http://127.0.0.1:39132",
     key = "browser-fixture-key";
   let child, browser;
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVpQAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const imageFile = { name: "test.png", mimeType: "image/png", buffer: png };
   const upstream = http.createServer(async (req, res) => {
     let text = "";
     for await (const c of req) text += c;
@@ -194,6 +199,72 @@ const fs = require("node:fs"),
       .waitFor();
     console.log("PASS browser character approval and activation");
     await admin
+      .getByLabel("上传角色头像", { exact: true })
+      .setInputFiles(imageFile);
+    await admin.waitForFunction(() =>
+      document
+        .querySelector(".resident-admin .image-upload-preview")
+        ?.getAttribute("src")
+        ?.startsWith("/media/uploads/"),
+    );
+    await admin
+      .getByRole("button", { name: "保存角色头像", exact: true })
+      .click();
+    await admin.waitForFunction(async () => {
+      const r = await fetch("/v1/admin/ai/roles").then((r) => r.json());
+      return (
+        r.items.find((r) => r.id === "ellen-joe").avatarSource === "manual"
+      );
+    });
+    const uploadedRole = (
+      await (await admin.request.get(base + "/v1/admin/ai/roles")).json()
+    ).items.find((r) => r.id === "ellen-joe");
+    assert.match(uploadedRole.avatarUrl, /^\/media\/uploads\//);
+    assert.equal(
+      (await user.request.get(base + uploadedRole.avatarUrl)).status(),
+      200,
+    );
+    const imageId = uploadedRole.avatarUrl.split("/").at(-1).split(".")[0];
+    const draftResponse = await admin.request.post(base + "/v1/posts", {
+      data: {
+        title: "真实上传图片测试",
+        body: "上传图片封面",
+        coverIds: [imageId],
+      },
+    });
+    assert.equal(draftResponse.status(), 201);
+    const draft = await draftResponse.json();
+    assert.equal(
+      (
+        await (
+          await admin.request.get(base + `/v1/posts/${draft.id}/edit`)
+        ).json()
+      ).covers[0].id,
+      imageId,
+    );
+    assert.equal(
+      (
+        await admin.request.post(base + `/v1/posts/${draft.id}/publish`, {
+          data: {},
+        })
+      ).status(),
+      200,
+    );
+    const published = await (
+      await admin.request.get(base + `/v1/posts/${draft.id}`)
+    ).json();
+    assert.equal(published.covers[0].id, imageId);
+    const comment = await admin.request.post(
+      base + `/v1/posts/${draft.id}/comments`,
+      { data: { body: "", imageIds: [imageId] } },
+    );
+    assert.equal(comment.status(), 201);
+    assert.equal((await comment.json()).images[0].id, imageId);
+    console.log(
+      "PASS actual image upload, saved AI avatar, post covers and image-only comments",
+    );
+
+    await admin
       .getByLabel("角色相关写作命令")
       .fill("分享你下班后与同伴的角色同人日常");
     await admin
@@ -261,6 +332,26 @@ const fs = require("node:fs"),
       false,
     );
     console.log("PASS mobile AI admin and chat no horizontal overflow");
+    await admin.locator(".role-catalog summary").click();
+    await admin.getByLabel("搜索角色名或Wiki标题").fill("Kafka");
+    await admin.locator(".role-catalog-list input[type=checkbox]").check();
+    admin.once("dialog", (d) => d.accept());
+    await admin
+      .getByRole("button", { name: "删除选中角色", exact: true })
+      .click();
+    await admin.waitForFunction(
+      () =>
+        !document.querySelector('.resident-admin select option[value="kafka"]'),
+    );
+    assert.equal(
+      await admin.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    await admin.locator(".role-catalog summary").click();
+    console.log("PASS searchable mobile bulk role management and deletion");
+
     await admin
       .locator(".resident-admin select")
       .first()
@@ -276,9 +367,37 @@ const fs = require("node:fs"),
         ),
     );
     console.log("PASS role deletion updates UI and keeps it out of list");
+    await admin
+      .getByRole("button", { name: "站点外观 / 设置", exact: true })
+      .click();
+    await admin
+      .getByLabel("上传网站图标", { exact: true })
+      .setInputFiles(imageFile);
+    await admin.waitForFunction(() =>
+      document
+        .querySelector(".admin .image-upload-preview")
+        ?.getAttribute("src")
+        ?.startsWith("/media/uploads/"),
+    );
+    await admin.getByRole("button", { name: "保存外观", exact: true }).click();
+    await admin.waitForFunction(async () => {
+      const r = await fetch("/v1/site").then((r) => r.json());
+      return r.siteIcon.startsWith("/media/uploads/");
+    });
+    console.log("PASS site image upload and saved appearance");
     await admin.setViewportSize({ width: 1440, height: 1000 });
     await admin.goto(base + "/create");
     await admin.locator(".commission-masthead h1").waitFor();
+    await admin
+      .locator(".ik-create-panel .post-body-editor input[type=file]")
+      .setInputFiles(imageFile);
+    await admin.waitForFunction(() =>
+      document
+        .querySelector(".ik-create-panel textarea.post-body-editor__source")
+        ?.value.includes("/media/uploads/"),
+    );
+    console.log("PASS body editor embeds uploaded image HTML");
+
     assert.equal(
       await admin.evaluate(
         () => document.documentElement.scrollWidth > innerWidth,

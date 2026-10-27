@@ -1,3 +1,4 @@
+import { createUploads } from './uploads.mjs';
 import { createResidentAI } from './ai/index.mjs';
 import { createMessenger } from './messenger.mjs';
 import { createProfiles, validateProfile } from './site-data.mjs';
@@ -55,6 +56,7 @@ db.exec("COMMIT");
 db.prepare("INSERT OR IGNORE INTO app_meta VALUES('demo_initialized','1')").run();
 const insert = db.prepare("INSERT OR IGNORE INTO posts VALUES (?,?)");
 const profiles = createProfiles(db);
+const uploads = createUploads(db,profiles);
 const publicUser = (u) => ({
   id: u.id,
   name: profiles.get(u.id).nickname || u.username,
@@ -64,7 +66,7 @@ const publicUser = (u) => ({
   username: u.username,
   level: profiles.get(u.id).level,
   examPassed: true,
-  avatarUrl: profiles.get(u.id).avatarUrl || (["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`),
+  avatarUrl: profiles.get(u.id).avatarUrl || u.avatarUrl || (["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`),
 });
 const fail = (status, detail) => Object.assign(new Error(detail), { status });
 async function body(req,limit=1048576) {
@@ -160,6 +162,7 @@ const app = http.createServer(async (req, res) => {
       if (admin.banned(user)) throw fail(403, "账号已被封禁");
       return user;
     };
+    if (await uploads.handler({path,req,url,auth,body,reply,res})) return;
     if (await residentAI.handler({path,req,url,auth,body,reply})) return;
     if (await admin.handler({ path, req, url, auth, body, reply })) return;
     if (await messenger.handler({ path, req, url, auth, body, reply, fileReply(bytes,a){res.writeHead(200,{'content-type':a.mime,'content-length':bytes.length,'content-disposition':`${a.type==='image'||a.type==='audio'?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name).replace(/'/g,'%27')}`,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"});res.end(bytes);} })) return;
@@ -345,7 +348,7 @@ const app = http.createServer(async (req, res) => {
         const b = await body(req);
         if (
           typeof b.body !== "string" ||
-          !b.body.trim() ||
+          (!b.body.trim() && !b.imageIds?.length) ||
           b.body.length > 10000
         )
           throw fail(400, "评论需1–10000字");
@@ -358,13 +361,14 @@ const app = http.createServer(async (req, res) => {
           const parent = JSON.parse(row.data);
           parentId = parent.parentId || parent.id;
         }
-        if (b.isAnonymous || b.imageIds?.length)
-          throw fail(400, "此开发版暂不支持匿名或图片评论");
+        if (b.isAnonymous)
+          throw fail(400, "暂不支持匿名评论");
         const c = {
           id: randomUUID(),
           postId: cm[1],
           authorId: user.id,
           body: b.body,
+          images: uploads.resolveImages(b.imageIds||[],user),
           parentId,
           createdAt: new Date().toISOString(),
         };
@@ -439,9 +443,9 @@ const app = http.createServer(async (req, res) => {
       ),
       category: SEED_CATEGORIES.find((c) => c.id === p.categoryId),
       tags: (p.tags || []).map((t) => ({ slug: t, name: t })),
-      cover: p.coverSlug
+      cover: p.covers?.[0] || (p.coverSlug
         ? p.coverSlug === "cover-cunning-hares" ? {url: "/images/zzz.webp", width:1921, height:1537} : { url: `/media/cover/${p.coverSlug}.svg`, width: 800, height: ZZZ_COVERS[p.coverSlug]?.h || 508 }
-        : null,
+        : null),
     });
     const userPosts=path.match(/^\/v1\/users\/([^/]+)\/posts$/);
     if(userPosts && req.method==='GET') {
@@ -494,8 +498,8 @@ const app = http.createServer(async (req, res) => {
       if (!admin.settings().postingOpen && !admin.isAdmin(user)) throw fail(403, "发帖暂时关闭");
       auth();
       const b = await body(req);
-      if (b.isAnonymous || b.coverIds?.length || b.externalVideos?.length)
-        throw fail(400, "此开发版暂不支持匿名、图片上传及外部视频");
+      if (b.isAnonymous || b.externalVideos?.length)
+        throw fail(400, "暂不支持匿名及外部视频");
       if (
         typeof b.title !== "string" ||
         b.title.length > 200 ||
@@ -506,6 +510,7 @@ const app = http.createServer(async (req, res) => {
         id: randomUUID(),
         title: b.title,
         body: b.body,
+        covers: uploads.resolveImages(b.coverIds||[],user),
         status: "draft",
         authorId: user.id,
         categoryId:
@@ -530,7 +535,7 @@ const app = http.createServer(async (req, res) => {
       const raw = JSON.parse(r.data);
       if (raw.status === "draft") throw fail(404, "帖子尚未发布");
       const p = toPost(raw);
-      return reply({ ...p, covers: p.cover ? [p.cover] : [] });
+      return reply({ ...p, covers: p.covers?.length ? p.covers : (p.cover ? [p.cover] : []) });
     }
     const draftPath = path.match(
       /^\/v1\/posts\/([^/]+)\/(draft|publish|edit)$/,
@@ -543,13 +548,13 @@ const app = http.createServer(async (req, res) => {
         return reply({
           ...p,
           tags: (p.tags || []).map((t) => ({ slug: t, name: t })),
-          covers: [],
+          covers: p.covers || [],
           videos: [],
         });
       if (draftPath[2] === "draft" && req.method === "PUT") {
         const b = await body(req);
-        if (b.isAnonymous || b.coverIds?.length || b.externalVideos?.length)
-          throw fail(400, "此开发版暂不支持匿名、图片上传及外部视频");
+        if (b.isAnonymous || b.externalVideos?.length)
+          throw fail(400, "暂不支持匿名及外部视频");
         if (
           typeof b.title !== "string" ||
           b.title.length > 200 ||
@@ -560,6 +565,7 @@ const app = http.createServer(async (req, res) => {
           ...p,
           title: b.title,
           body: b.body,
+          covers: uploads.resolveImages(b.coverIds||[],user),
           categoryId:
             SEED_CATEGORIES.find((c) => c.id === b.categoryId)?.id || null,
           tags: Array.isArray(b.tags)
