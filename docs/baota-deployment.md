@@ -41,8 +41,8 @@ SEED_DEMO=0
 安装并构建：
 
 ```sh
-npm ci --prefix server
-npm ci --prefix web
+npm ci --prefix server --registry=https://registry.npmjs.org/
+npm ci --prefix web --include=dev --registry=https://registry.npmjs.org/
 npm run build:web --prefix server
 ```
 
@@ -155,3 +155,20 @@ pm2 save
 原数据库仍保留在原DATA_DIR，update.sh不会用备份覆盖它。不要用重新clone后空的DATA_DIR替换老目录。由于当前前端构建同步到public是就地复制，更新过程中静态页面可能短暂不一致，建议维护窗口更新；此版本不宣称零停机原子部署。
 
 更新后检查：`https://域名/health` 应返回 `{"ok":true}`，再验证登录、原帖子、管理后台及WebSocket。
+
+## npm镜像404 / nuxt找不到
+
+`https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/` 是Node运行时下载镜像，**不是npm包仓库**。不要把它填到npm registry。Node运行时镜像与npm包源是两个独立设置。
+
+安装时使用官方npm源（项目.npmrc已配置，update.sh也显式传入）：
+
+```sh
+cd /www/wwwroot/sw
+npm ci --prefix server --registry=https://registry.npmjs.org/ && \
+npm ci --prefix web --include=dev --registry=https://registry.npmjs.org/ && \
+npm run build:web --prefix server
+```
+
+用`&&`保证安装失败后不继续构建。无需删除数据库、.env或package-lock.json。`nuxt: command not found`通常是前端依赖安装失败，或生产环境省略了开发依赖；构建时明确`--include=dev`。无需全局安装nuxt。
+
+如官方npm源在服务器网络无法访问，可自行选择可信的npm包镜像（例如`https://registry.npmmirror.com/`），而不是Node二进制镜像目录；设置`NPM_REGISTRY`可覆盖update.sh所用包源。项目不保证第三方镜像的可达性和同步进度。安装日志显示的Node26并非本项目推荐的22.x部署环境，建议同时在宝塔与SSH终端切换到22.22+的22.x版本。

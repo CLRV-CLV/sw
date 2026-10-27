@@ -73,8 +73,9 @@ if [[ "$DATA_PATH" == "$ROOT"/* ]]; then
 fi
 [[ -z "$(git ls-tree -r --name-only "$TARGET" -- .env backups)" ]] || { echo 'Target tracks private config/backups; refused before merge.' >&2; exit 1; }
 git merge --ff-only "$TARGET"
-npm ci --prefix server
-npm ci --prefix web
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org/}"
+npm ci --prefix server --registry="$NPM_REGISTRY"
+npm ci --prefix web --include=dev --registry="$NPM_REGISTRY"
 npm run build:web --prefix server
 if [[ "$RESTART" != none && "$HAS_PM2" == 1 ]]; then
   pm2 restart "$APP" --update-env
