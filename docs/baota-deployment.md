@@ -193,3 +193,9 @@ git rev-parse --short HEAD
 `/health`应返回`{"ok":true}`。重新打开站点并硬刷新，进入`/web/messages`（手机`/h5/messages`）验证好友和群聊。新表/字段由服务启动时自动增加，无需清库或重新注册；备份目录由脚本输出。若出现本地修改拒绝更新，先用`git status --short`审查，勿直接强制重置或删除数据目录。
 
 本轮附件保存在SQLite内，更新脚本的在线数据库备份包含附件；未来若改用外部对象存储则需要单独备份策略。录音需HTTPS和浏览器麦克风授权，语音消息不等于实时语音通话。
+
+### New API驻站AI（可选）
+
+更新后可在后台“驻站AI / New API”配置，不需要把Key发到聊天里。默认HTTPS，可信内网HTTP部署需额外设置`AI_ALLOW_HTTP=1`。角色仍需Wiki导入、详细档案生成、审核及启用，详见[驻站AI部署与安全边界](resident-ai.md)。
+
+`update.sh`现在备份存在的`DATA_DIR/.ai-config-key`，与SQLite配套保管；使用`AI_CONFIG_SECRET`时保留原环境变量。恢复数据库时不能丢失或更换其加密密钥。

@@ -52,6 +52,7 @@ interface Group {
   ownerId: string;
   members: Peer[];
 }
+const aiMode=ref(useRoute().query.tab==='ai');
 const auth = useAuthStore(),
   login = useLoginDialog(),
   rt = useRealtime();
@@ -645,7 +646,7 @@ watch(
     <p v-if="notice" role="status">
       {{ notice }} <button @click="notice = ''">关闭提示</button>
     </p>
-    <div v-if="auth.isLogin" class="workspace">
+    <nav v-if="auth.isLogin" class="message-modes"><button :aria-pressed="!aiMode" @click="aiMode=false">联系人 / 群聊</button><button :aria-pressed="aiMode" @click="aiMode=true">驻站角色AI</button></nav><ResidentAIChat v-if="auth.isLogin&&aiMode"/><div v-if="auth.isLogin&&!aiMode" class="workspace">
       <aside>
         <h2>通讯录</h2>
         <form @submit.prevent="search">

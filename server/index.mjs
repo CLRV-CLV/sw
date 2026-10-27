@@ -1,3 +1,4 @@
+import { createResidentAI } from './ai/index.mjs';
 import { createMessenger } from './messenger.mjs';
 import { createProfiles, validateProfile } from './site-data.mjs';
 import { createAdmin } from './admin.mjs';
@@ -85,6 +86,7 @@ const sessionUser = token => {
   const u=session&&db.prepare('SELECT id,username FROM users WHERE id=?').get(session.userId);return u&&!admin.banned(u)?u:null;
 };
 const messenger=createMessenger(db,{publicUser,banned:admin.banned,send(uid,t,d){for(const ws of sockets.clients)if(ws.readyState===1&&sessionUser(ws.sessionToken)?.id===uid)ws.send(JSON.stringify({op:'event',t,d}));}});
+const residentAI=createResidentAI(db,{admin,broadcast,dataDir:dir,send(uid,t,d){for(const ws of sockets.clients)if(ws.readyState===1&&sessionUser(ws.sessionToken)?.id===uid)ws.send(JSON.stringify({op:'event',t,d}));}});
 const app = http.createServer(async (req, res) => {
   const reply = (data, status = 200) => {
     res.writeHead(status, {
@@ -158,6 +160,7 @@ const app = http.createServer(async (req, res) => {
       if (admin.banned(user)) throw fail(403, "账号已被封禁");
       return user;
     };
+    if (await residentAI.handler({path,req,url,auth,body,reply})) return;
     if (await admin.handler({ path, req, url, auth, body, reply })) return;
     if (await messenger.handler({ path, req, url, auth, body, reply, fileReply(bytes,a){res.writeHead(200,{'content-type':a.mime,'content-length':bytes.length,'content-disposition':`${a.type==='image'||a.type==='audio'?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name).replace(/'/g,'%27')}`,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"});res.end(bytes);} })) return;
     if (await connections({ path, req, res, url, auth, reply })) return;
@@ -261,7 +264,7 @@ const app = http.createServer(async (req, res) => {
     }
     const profileMatch=path.match(/^\/v1\/users\/([^/]+)$/);
     if(profileMatch && req.method==='GET') {
-      const id=decodeURIComponent(profileMatch[1]);const target=db.prepare('SELECT id,username FROM users WHERE id=?').get(id)||SEED_USERS.find(u=>u.id===id);
+      const id=decodeURIComponent(profileMatch[1]);const target=db.prepare('SELECT id,username FROM users WHERE id=?').get(id)||SEED_USERS.find(u=>u.id===id)||residentAI.author(id);
       if(!target)throw fail(404,'用户不存在');const p=profiles.get(id),me=publicUser(target),self=user?.id===id;
       if(p.hidden&&!self&&!admin.isAdmin(user))return reply({id,username:me.name,isHidden:true,isSelf:false});
       const posts=db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft');
@@ -428,7 +431,7 @@ const app = http.createServer(async (req, res) => {
         .get(p.id).n,
       excerpt: p.body.slice(0, 160),
       author: publicUser(
-        SEED_USERS.find((u) => u.id === p.authorId) ||
+        residentAI.author(p.authorId) || SEED_USERS.find((u) => u.id === p.authorId) ||
           db.prepare("SELECT * FROM users WHERE id=?").get(p.authorId) || {
             id: p.authorId,
             username: "绳匠",

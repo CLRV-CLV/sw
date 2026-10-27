@@ -55,6 +55,8 @@ if(existsSync(dbFile)) {
   try { await backup(db,path.join(dest,'interknot.sqlite')); } finally { db.close(); }
 }
 if(existsSync('.env')) copyFileSync('.env',path.join(dest,'.env'));
+const aiKey=path.join(process.env.SW_DATA_PATH,'.ai-config-key');
+if(existsSync(aiKey)) copyFileSync(aiKey,path.join(dest,'.ai-config-key'));
 writeFileSync(path.join(dest,'metadata.json'),JSON.stringify({dataDir:process.env.SW_DATA_PATH,date:new Date().toISOString()},null,2));
 JS
 chmod -R go-rwx "$BACKUP"
@@ -84,4 +86,4 @@ else
   echo 'Build complete. Restart this project in BaoTa Node project manager (do not start a second process on the existing project PORT).'
 fi
 echo "Updated $OLD -> $(git rev-parse HEAD), source branch: $BRANCH"
-echo 'Database preserved. Backup contains DB/.env only; back up any custom media directories separately.'
+echo 'Database preserved. Backup contains DB/.env/AI encryption key; back up any custom media directories separately.'
