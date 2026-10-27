@@ -471,9 +471,12 @@ test("Wiki category discovery follows bounded continuation, filters non-characte
   });
   assert.deepEqual(
     result.items.map((r) => r.wiki),
-    ["Ellen Joe", "Nicole Demara", "Fairy"],
+    ["Ellen Joe", "Nicole Demara"],
   );
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 2);
+  assert.ok(
+    requests.every((u) => u.searchParams.get("cmtitle") === "Category:Agents"),
+  );
   assert.equal(result.truncated, false);
 });
 test("AI site budget applies across accounts; editing dossier invalidates approval; missing wiki approval cannot be bypassed", async () => {
@@ -791,6 +794,158 @@ test("bulk role manager validates all IDs before deleting and preserves tombston
     assert.equal(result.items.length, 2);
     const remaining = (await f.call("admin", "/v1/admin/ai/roles")).items;
     assert.ok(!remaining.some((r) => ["billy-kid", "kafka"].includes(r.id)));
+  } finally {
+    f.close();
+  }
+});
+
+test("legacy NPC cleanup previews over 1000 entries, protects edited/source/curated roles and revalidates atomically", async () => {
+  const f = fixture();
+  try {
+    const insert = (i, patch = {}) => {
+      const r = {
+        id: "wiki-" + i.toString(16).padStart(24, "0"),
+        name: "Old NPC " + i,
+        wiki: "Old_NPC_" + i,
+        kind: "resident",
+        enabled: false,
+        approved: false,
+        dossier: null,
+        sources: [],
+        sourceStatus: "pending",
+        version: 1,
+        avatarUrl: "",
+        ...patch,
+      };
+      f.db
+        .prepare("INSERT INTO ai_roles VALUES(?,?)")
+        .run(r.id, JSON.stringify(r));
+      return r.id;
+    };
+    const ids = Array.from({ length: 1005 }, (_, i) => insert(i));
+    const protectedIds = [
+      insert(2001, { version: 2 }),
+      insert(2002, { sourceText: "manually maintained" }),
+      insert(2003, { avatarUrl: "/custom.png" }),
+      insert(2004, { approved: true }),
+      insert(2005, { enabled: true }),
+      insert(2006, { dossier: { identity: "kept" } }),
+      insert(2007, { sources: [{ url: "verified" }] }),
+      insert(2008, { wiki: "Fairy" }),
+      insert(2009, { kind: "agent" }),
+      insert(2010, { id: "custom-resident" }),
+    ];
+    await assert.rejects(f.call("alice", "/v1/admin/ai/catalog-cleanup"), {
+      status: 403,
+    });
+    const preview = await f.call("admin", "/v1/admin/ai/catalog-cleanup");
+    assert.equal(preview.total, 1005);
+    await assert.rejects(
+      f.call("admin", "/v1/admin/ai/catalog-cleanup", "POST", {
+        ids: [ids[0], protectedIds[0]],
+      }),
+      { status: 409 },
+    );
+    assert.equal(
+      (await f.call("admin", "/v1/admin/ai/catalog-cleanup")).total,
+      1005,
+    );
+    const result = await f.call(
+      "admin",
+      "/v1/admin/ai/catalog-cleanup",
+      "POST",
+      { ids },
+    );
+    assert.equal(result.removed.length, 1005);
+    assert.equal(
+      (await f.call("admin", "/v1/admin/ai/catalog-cleanup")).total,
+      0,
+    );
+    const kept = (await f.call("admin", "/v1/admin/ai/roles")).items;
+    assert.ok(protectedIds.every((id) => kept.some((r) => r.id === id)));
+    assert.ok(kept.some((r) => r.id === "fairy"));
+    assert.equal(
+      JSON.parse(
+        f.db.prepare("SELECT data FROM ai_roles WHERE id=?").get(ids[0]).data,
+      ).deleted,
+      true,
+    );
+  } finally {
+    f.close();
+  }
+});
+test("bulk deletion supports more than 100 explicit selections in one atomic request", async () => {
+  const f = fixture();
+  try {
+    const ids = Array.from({ length: 120 }, (_, i) => {
+      const id = "bulk-" + i;
+      f.db.prepare("INSERT INTO ai_roles VALUES(?,?)").run(
+        id,
+        JSON.stringify({
+          id,
+          name: id,
+          wiki: "Bulk " + i,
+          kind: "resident",
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [],
+          sourceStatus: "pending",
+          version: 1,
+          avatarUrl: "",
+        }),
+      );
+      return id;
+    });
+    const result = await f.call("admin", "/v1/admin/ai/roles/batch", "POST", {
+      action: "delete",
+      ids,
+    });
+    assert.equal(result.items.length, 120);
+    assert.deepEqual(result.remaining, []);
+  } finally {
+    f.close();
+  }
+});
+
+test("bulk Wiki jobs respect available queue capacity and return every unqueued selection", async () => {
+  const f = fixture();
+  try {
+    f.ai.close(); // Freeze the worker to verify queue admission deterministically.
+    for (let i = 0; i < 95; i++)
+      f.db
+        .prepare("INSERT INTO ai_jobs VALUES(?,?,?,?,?,?,?,?)")
+        .run(
+          "occupied-" + i,
+          "admin",
+          "wiki",
+          "occupied-role-" + i,
+          "occupied-client-" + i,
+          "queued",
+          "{}",
+          new Date().toISOString(),
+        );
+    const ids = roster.slice(0, 10).map((r) => r.id);
+    const result = await f.call("admin", "/v1/admin/ai/roles/batch", "POST", {
+      action: "wiki",
+      ids,
+      clientId: "queue-capacity",
+    });
+    assert.equal(result.items.length, 5);
+    assert.deepEqual(result.remaining, ids.slice(5));
+    assert.equal(
+      f.db.prepare("SELECT count(*) n FROM ai_jobs WHERE state='queued'").get()
+        .n,
+      100,
+    );
+    await assert.rejects(
+      f.call("admin", "/v1/admin/ai/roles/batch", "POST", {
+        action: "wiki",
+        ids: result.remaining,
+        clientId: "queue-full",
+      }),
+      { status: 429 },
+    );
   } finally {
     f.close();
   }

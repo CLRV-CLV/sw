@@ -95,6 +95,22 @@ export function createResidentAI(
       .all()
       .map((r) => JSON.parse(r.data))
       .filter((r) => !r.deleted);
+  function cleanupEligible(r) {
+    return (
+      /^wiki-[0-9a-f]{24}$/.test(r.id) &&
+      r.kind === "resident" &&
+      !r.deleted &&
+      !r.enabled &&
+      !r.approved &&
+      !r.dossier &&
+      r.version === 1 &&
+      r.sourceStatus === "pending" &&
+      !r.sourceText &&
+      !(r.sources || []).length &&
+      !r.avatarUrl &&
+      !roster.some((known) => wikiIdentity(known.wiki) === wikiIdentity(r.wiki))
+    );
+  }
   const configured = () => {
     const c = provider.view();
     return !!(c.enabled && c.hasApiKey && c.baseUrl && c.model);
@@ -760,7 +776,9 @@ export function createResidentAI(
         {
           items: roles.slice(0, room).map((r) =>
             enqueue(actor, kind, r.id, {
-              clientId: `${b.clientId}:${r.id}`,
+              clientId: createHash("sha256")
+                .update(JSON.stringify([b.clientId, r.id]))
+                .digest("hex"),
             }),
           ),
           remaining: Math.max(0, roles.length - room),
@@ -800,7 +818,9 @@ export function createResidentAI(
         {
           items: roles.slice(0, room).map((r) =>
             enqueue(actor, "dossier", r.id, {
-              clientId: `${b.clientId}:${r.id}`,
+              clientId: createHash("sha256")
+                .update(JSON.stringify([b.clientId, r.id]))
+                .digest("hex"),
             }),
           ),
           remaining: Math.max(0, roles.length - room),
@@ -868,17 +888,46 @@ export function createResidentAI(
       });
       return true;
     }
+    if (path === "/v1/admin/ai/catalog-cleanup" && method === "GET") {
+      const items = list()
+        .filter((r) => cleanupEligible(get(r.id)))
+        .map(({ id, name, wiki }) => ({ id, name, wiki }));
+      reply({ items, total: items.length });
+      return true;
+    }
+    if (path === "/v1/admin/ai/catalog-cleanup" && method === "POST") {
+      const b = await body(req);
+      if (
+        !Array.isArray(b.ids) ||
+        !b.ids.length ||
+        b.ids.length > 2000 ||
+        b.ids.some((id) => typeof id !== "string") ||
+        new Set(b.ids).size !== b.ids.length
+      )
+        throw fail(400, "请选择有效的清理候选");
+      const records = b.ids.map(get);
+      if (!records.every(cleanupEligible))
+        throw fail(
+          409,
+          "候选已被编辑或不符合安全清理条件，请重新预览；没有删除任何角色",
+        );
+      transaction(() => {
+        for (const r of records) removeRecord(r, true, actor);
+      });
+      reply({ removed: b.ids });
+      return true;
+    }
     if (path === "/v1/admin/ai/roles/batch" && method === "POST") {
       const b = await body(req);
       if (
         !["delete", "wiki", "avatar"].includes(b.action) ||
         !Array.isArray(b.ids) ||
         !b.ids.length ||
-        b.ids.length > 100 ||
+        b.ids.length > 2000 ||
         b.ids.some((id) => typeof id !== "string") ||
         new Set(b.ids).size !== b.ids.length
       )
-        throw fail(400, "请选择1至100个不同角色与有效操作");
+        throw fail(400, "请选择1至2000个不同角色与有效操作");
       if (
         b.action !== "delete" &&
         (typeof b.clientId !== "string" ||
@@ -887,18 +936,38 @@ export function createResidentAI(
       )
         throw fail(400, "无效批量标识");
       const records = b.ids.map(get);
+      const capacity =
+        b.action === "delete"
+          ? records.length
+          : Math.max(
+              0,
+              100 -
+                db
+                  .prepare(
+                    "SELECT count(*) n FROM ai_jobs WHERE state IN ('queued','running')",
+                  )
+                  .get().n,
+            );
+      if (!capacity)
+        throw fail(429, "AI任务队列已满，选中项已保留，请待任务完成后重试");
+      const accepted = records.slice(0, capacity);
       const items = transaction(() =>
-        records.map((r) => {
+        accepted.map((r) => {
           if (b.action === "delete") {
             removeRecord(r, true, actor);
             return { id: r.id, deleted: true };
           }
           return enqueue(actor, b.action, r.id, {
-            clientId: `${b.clientId}:${r.id}`,
+            clientId: createHash("sha256")
+              .update(JSON.stringify([b.clientId, r.id]))
+              .digest("hex"),
           });
         }),
       );
-      reply({ items }, b.action === "delete" ? 200 : 202);
+      reply(
+        { items, remaining: records.slice(accepted.length).map((r) => r.id) },
+        b.action === "delete" ? 200 : 202,
+      );
       return true;
     }
     const manage = path.match(

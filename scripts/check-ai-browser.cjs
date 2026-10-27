@@ -338,7 +338,98 @@ const fs = require("node:fs"),
       false,
     );
     console.log("PASS mobile AI admin and chat no horizontal overflow");
+    // Reproduce the user's >1000-entry legacy catalog using the actual SQLite DB.
+    const { DatabaseSync } = require("node:sqlite");
+    const catalogDb = new DatabaseSync(data + "/interknot.sqlite");
+    for (let i = 0; i < 1006; i++) {
+      const id = "wiki-" + i.toString(16).padStart(24, "0");
+      catalogDb.prepare("INSERT INTO ai_roles VALUES(?,?)").run(
+        id,
+        JSON.stringify({
+          id,
+          name: "Legacy NPC " + i,
+          wiki: "Legacy_NPC_" + i,
+          kind: "resident",
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [],
+          sourceStatus: "pending",
+          version: i === 1005 ? 2 : 1,
+          avatarUrl: "",
+        }),
+      );
+    }
+    catalogDb.close();
+    await admin.reload();
+    await admin
+      .getByRole("button", { name: "驻站AI / New API", exact: true })
+      .click();
     await admin.locator(".role-catalog summary").click();
+    await admin.getByRole("button", { name: "全选全部", exact: true }).click();
+    const totalRoles = await admin
+      .locator(".role-catalog-list input[type=checkbox]")
+      .count();
+    assert.ok(totalRoles > 1000);
+    assert.equal(
+      await admin.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    assert.equal(
+      await admin.locator(".role-catalog-list input:checked").count(),
+      totalRoles,
+    );
+    await admin.getByLabel("搜索角色名或Wiki标题").fill("Kafka");
+    await admin
+      .getByRole("button", { name: "反选搜索结果", exact: true })
+      .click();
+    assert.equal(
+      await admin.locator(".role-catalog-list input:checked").count(),
+      0,
+    );
+    await admin.getByLabel("搜索角色名或Wiki标题").fill("");
+    assert.equal(
+      await admin.locator(".role-catalog-list input:checked").count(),
+      totalRoles - 1,
+    );
+    await admin.getByRole("button", { name: "取消全选", exact: true }).click();
+    assert.equal(
+      await admin.locator(".role-catalog-list input:checked").count(),
+      0,
+    );
+    await admin.getByLabel("搜索角色名或Wiki标题").fill("Kafka");
+    await admin
+      .getByRole("button", { name: "全选搜索结果", exact: true })
+      .click();
+    assert.equal(
+      await admin.locator(".role-catalog-list input:checked").count(),
+      1,
+    );
+    admin.once("dialog", (d) => d.accept());
+    const cleanup = admin.waitForResponse(
+      (r) =>
+        r.url().endsWith("/catalog-cleanup") && r.request().method() === "POST",
+    );
+    await admin
+      .getByRole("button", { name: "清理旧版误导入NPC候选", exact: true })
+      .click();
+    assert.equal((await cleanup).status(), 200);
+    await admin.getByLabel("搜索角色名或Wiki标题").fill("Legacy NPC");
+    await admin.waitForFunction(
+      () =>
+        document.querySelectorAll(".role-catalog-list input[type=checkbox]")
+          .length === 1,
+    );
+    assert.ok(
+      (await admin.locator(".role-catalog-list").innerText()).includes(
+        "Legacy NPC 1005",
+      ),
+    );
+    console.log(
+      "PASS 1000+ role select all/invert/filter preservation and safe legacy NPC cleanup",
+    );
     await admin.getByLabel("搜索角色名或Wiki标题").fill("Kafka");
     await admin.locator(".role-catalog-list input[type=checkbox]").check();
     admin.once("dialog", (d) => d.accept());

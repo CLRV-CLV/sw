@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { selectRoleResults } from "~/utils/role-selection";
 interface Role {
   id: string;
   name: string;
@@ -59,6 +60,43 @@ const filteredRoles = computed(() =>
       .includes(roleSearch.value.toLowerCase().trim()),
   ),
 );
+function selectResults(invert = false) {
+  checkedRoles.value = selectRoleResults(
+    checkedRoles.value,
+    filteredRoles.value.map((r) => r.id),
+    invert,
+  );
+}
+async function cleanupCatalog() {
+  await act(async () => {
+    const preview = await $fetch<{
+      items: { id: string; name: string; wiki: string }[];
+      total: number;
+    }>("/v1/admin/ai/catalog-cleanup");
+    if (!preview.total) {
+      notice.value =
+        "没有可安全清理的旧NPC候选。已编辑、导入资料、审核或启用的条目不会自动清理，可手动选择删除。";
+      return;
+    }
+    if (
+      !confirm(
+        `发现${preview.total}个旧版误导入NPC候选。仅清理从未编辑、未导入资料、未审核、未启用的自动发现项；内置角色、自建角色和已维护资料不动。示例：${preview.items
+          .slice(0, 8)
+          .map((r) => r.name)
+          .join("、")}。确认删除？`,
+      )
+    )
+      return;
+    const result = await $fetch<{ removed: string[] }>(
+      "/v1/admin/ai/catalog-cleanup",
+      { method: "POST", body: { ids: preview.items.map((r) => r.id) } },
+    );
+    const removed = new Set(result.removed);
+    checkedRoles.value = checkedRoles.value.filter((id) => !removed.has(id));
+    if (removed.has(selected.value)) selected.value = "";
+    notice.value = `已安全清理${result.removed.length}个旧NPC候选，后续自动发现不会重新导入。`;
+  });
+}
 async function batch(action: "delete" | "wiki" | "avatar") {
   if (!checkedRoles.value.length) return;
   if (
@@ -70,17 +108,20 @@ async function batch(action: "delete" | "wiki" | "avatar") {
     return;
   await act(async () => {
     const ids = [...checkedRoles.value];
-    await $fetch("/v1/admin/ai/roles/batch", {
+    const result = await $fetch<{
+      items: { id?: string; roleId?: string }[];
+      remaining: string[];
+    }>("/v1/admin/ai/roles/batch", {
       method: "POST",
       body: { action, ids, clientId: crypto.randomUUID() },
     });
     if (action === "delete" && ids.includes(selected.value))
       selected.value = "";
-    checkedRoles.value = [];
+    checkedRoles.value = result.remaining;
     notice.value =
       action === "delete"
         ? `已删除${ids.length}个角色`
-        : `已为选中${ids.length}个角色加入${action === "wiki" ? "Wiki导入" : "头像更新"}任务，结果自动刷新。`;
+        : `已为${result.items.length}个角色加入${action === "wiki" ? "Wiki导入" : "头像更新"}任务；剩余${result.remaining.length}个保持选中，可待队列空闲后继续提交。`;
   });
 }
 const editAvatar = ref("");
@@ -167,6 +208,8 @@ async function pollJobs() {
     ]);
     jobs.value = j.items;
     roles.value = r.items;
+    const live = new Set(r.items.map((item) => item.id));
+    checkedRoles.value = checkedRoles.value.filter((id) => live.has(id));
     pollingError.value = "";
   } catch (e) {
     pollingError.value = detail(e);
@@ -213,6 +256,8 @@ async function load() {
     ]);
     config.value = c;
     roles.value = r.items;
+    const live = new Set(r.items.map((item) => item.id));
+    checkedRoles.value = checkedRoles.value.filter((id) => live.has(id));
     jobs.value = j.items;
   } catch (e) {
     error.value = detail(e);
@@ -307,7 +352,7 @@ async function catalog() {
       },
     });
     notice.value =
-      "Wiki角色/NPC目录发现任务已入队；新发现项保持停用，资料仍需导入、生成与审核。";
+      "Wiki代理人目录发现任务已入队（不扫描NPCs/邦布目录）；新发现项保持停用，资料仍需导入、生成与审核。";
   });
 }
 async function dossiers() {
@@ -470,18 +515,30 @@ onBeforeUnmount(() => {
             type="search"
             placeholder="输入中文名或英文标题"
         /></label>
-        <button
-          :disabled="busy"
-          @click="checkedRoles = filteredRoles.slice(0, 100).map((r) => r.id)"
-        >
-          选择搜索结果（最多100项）</button
-        ><button :disabled="busy" @click="checkedRoles = []">清除选择</button>
+        <div class="role-selection-tools">
+          <button
+            type="button"
+            :disabled="busy"
+            @click="checkedRoles = roles.map((r) => r.id)"
+          >
+            全选全部
+          </button>
+          <button type="button" :disabled="busy" @click="selectResults()">
+            全选搜索结果
+          </button>
+          <button type="button" :disabled="busy" @click="selectResults(true)">
+            反选搜索结果
+          </button>
+          <button type="button" :disabled="busy" @click="checkedRoles = []">
+            取消全选
+          </button>
+        </div>
         <p>
           已选
-          {{
-            checkedRoles.length
-          }}
-          项。此处显示全部目录，外语名跳过设置仅作用于自动发现与全目录批量任务。
+          {{ checkedRoles.length }}
+          项 / 全部{{ roles.length }}项 / 搜索结果{{
+            filteredRoles.length
+          }}项。反选仅改变搜索结果，保留其他已选项。删除支持全量；Wiki/头像任务按队列空位提交，未入队项保持选中。
         </p>
         <div class="role-catalog-list">
           <label v-for="r in filteredRoles" :key="r.id"
@@ -489,10 +546,7 @@ onBeforeUnmount(() => {
               v-model="checkedRoles"
               type="checkbox"
               :value="r.id"
-              :disabled="
-                busy ||
-                (!checkedRoles.includes(r.id) && checkedRoles.length >= 100)
-              "
+              :disabled="busy"
             /><button type="button" :disabled="busy" @click="selected = r.id">
               {{ r.name }}</button
             ><span
@@ -516,6 +570,13 @@ onBeforeUnmount(() => {
           删除选中角色
         </button>
       </details>
+      <button class="danger" :disabled="busy" @click="cleanupCatalog">
+        清理旧版误导入NPC候选
+      </button>
+      <p>
+        自动发现仅扫描代理人 Agents，不再扫描整个 NPCs
+        分类。哲、铃、Fairy等已有内置角色保留；其他指定角色可手动添加Wiki。
+      </p>
       <button :disabled="busy" @click="dedupe">清理不同语言的重复目录项</button>
       <p>
         流程：导入Wiki → 生成详细档案 → 核对来源与档案 → 审核 →
@@ -523,8 +584,7 @@ onBeforeUnmount(() => {
       </p>
       <button :disabled="busy" @click="avatars">
         批量更新Wiki头像（不重置档案）</button
-      ><button :disabled="busy" @click="catalog">
-        从Wiki发现角色 / NPC目录</button
+      ><button :disabled="busy" @click="catalog">从Wiki发现代理人目录</button
       ><button :disabled="busy" @click="syncAll">批量导入全部角色Wiki</button
       ><button :disabled="busy" @click="dossiers">
         批量生成详细档案（消耗模型额度）</button
@@ -734,6 +794,12 @@ onBeforeUnmount(() => {
   </div>
 </template>
 <style scoped>
+.role-selection-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .resident-admin {
   color: #dde3d3;
 }

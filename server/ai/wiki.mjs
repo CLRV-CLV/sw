@@ -144,10 +144,9 @@ export async function fetchWiki(
 export async function discoverWikiCharacters({ fetcher = fetch } = {}) {
   const found = new Map();
   let truncated = false;
-  for (const [category, kind] of [
-    ["Agents", "agent"],
-    ["NPCs", "resident"],
-  ]) {
+  // NPCs is a world-object category, not a curated cast list (Bangboo, vendors,
+  // incidental residents, etc.). Never bulk-expand it into resident AI roles.
+  for (const [category, kind] of [["Agents", "agent"]]) {
     let continuation = "";
     for (let page = 0; page < 6; page++) {
       const url = new URL("/api.php", wikiOrigin);
@@ -157,7 +156,7 @@ export async function discoverWikiCharacters({ fetcher = fetch } = {}) {
         cmtitle: `Category:${category}`,
         cmnamespace: "0",
         cmtype: "page",
-        cmlimit: "500",
+        cmlimit: "100",
         format: "json",
         ...(continuation ? { cmcontinue: continuation } : {}),
       }).toString();
