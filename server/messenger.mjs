@@ -221,6 +221,11 @@ export function createMessenger(db, { publicUser, send, banned }) {
             db.prepare(
               `UPDATE dm_relationships SET ${k}=? WHERE ownerId=? AND peerId=?`,
             ).run(k === "blocked" ? Number(v) : v, user.id, peerId);
+          // The account/feed blacklist and Knock Knock share one block state.
+          if ('blocked' in b && db.prepare("SELECT 1 FROM sqlite_master WHERE name='feed_blocks'").get()) {
+            if (b.blocked) db.prepare('INSERT OR IGNORE INTO feed_blocks VALUES(?,?,?)').run(user.id,peerId,new Date().toISOString());
+            else db.prepare('DELETE FROM feed_blocks WHERE userId=? AND peerId=?').run(user.id,peerId);
+          }
         });
         reply({ ok: true });
         return true;

@@ -134,3 +134,7 @@ cd web && npm run test:unit
 后台新增“驻站AI / New API”：配置服务地址、Key和模型，发现/导入Wiki角色资料，生成8维详细档案并审核启用；支持指定或随机角色按角色相关命令写真实AI标记帖子草稿。用户在敲敲“驻站角色AI”使用隔离的持久化文字聊天。
 
 角色目录不等于已核实档案；需要部署者配置真实服务并导入/审核资料，未就绪角色保持停用。包含主题边界/提示词套取防护，但不承诺绝对防越狱。详见[New API、Wiki、驻站AI配置与边界](docs/resident-ai.md)。
+
+## 全量补齐进度
+
+当前仍不是全部功能完成的发行版。主动排查台账见 [implementation-backlog](docs/implementation-backlog.md)，核心前端路径清单见 [api-contract-inventory](docs/api-contract-inventory.json)。静态路径存在不等于所有方法、入口与多端均验收通过。

@@ -1,3 +1,5 @@
+import { createActivity } from './activity.mjs';
+import { createCommunity, validateVideos } from './community.mjs';
 import { createUploads } from './uploads.mjs';
 import { createResidentAI } from './ai/index.mjs';
 import { createMessenger } from './messenger.mjs';
@@ -57,6 +59,7 @@ db.prepare("INSERT OR IGNORE INTO app_meta VALUES('demo_initialized','1')").run(
 const insert = db.prepare("INSERT OR IGNORE INTO posts VALUES (?,?)");
 const profiles = createProfiles(db);
 const uploads = createUploads(db,profiles);
+const activity=createActivity(db);
 const publicUser = (u) => ({
   id: u.id,
   name: profiles.get(u.id).nickname || u.username,
@@ -65,6 +68,8 @@ const publicUser = (u) => ({
   role: admin.isAdmin(u) ? "admin" : "user",
   username: u.username,
   level: profiles.get(u.id).level,
+  exp: profiles.get(u.id).exp,
+
   examPassed: true,
   avatarUrl: profiles.get(u.id).avatarUrl || u.avatarUrl || (["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`),
 });
@@ -72,7 +77,7 @@ const fail = (status, detail) => Object.assign(new Error(detail), { status });
 async function body(req,limit=1048576) {
   const chunks=[];let size=0;
   for await(const c of req){size+=c.length;if(size>limit)throw fail(413,"请求过大");chunks.push(c);}
-  try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}
+  try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');if(!value||typeof value!=='object'||Array.isArray(value))throw Error('object');return value;}
   catch{throw fail(400,"无效 JSON");}
 }
 
@@ -83,6 +88,7 @@ const broadcast = (t, d) => {
 };
 const connections = createConnections();
 const admin = createAdmin(db, { broadcast });
+const community=createCommunity(db,{profiles,admin,publicUser,uploads,broadcast});
 const sessionUser = token => {
   const session=token&&db.prepare('SELECT userId FROM sessions WHERE token=? AND expires>?').get(token,Date.now());
   const u=session&&db.prepare('SELECT id,username FROM users WHERE id=?').get(session.userId);return u&&!admin.banned(u)?u:null;
@@ -164,6 +170,8 @@ const app = http.createServer(async (req, res) => {
     };
     if (await uploads.handler({path,req,url,auth,body,reply,res})) return;
     if (await residentAI.handler({path,req,url,auth,body,reply})) return;
+    if (await activity.handler({path,req,url,auth,body,reply})) return;
+    if (await community.handler({path,req,url,auth,body,reply,user,token})) return;
     if (await admin.handler({ path, req, url, auth, body, reply })) return;
     if (await messenger.handler({ path, req, url, auth, body, reply, fileReply(bytes,a){res.writeHead(200,{'content-type':a.mime,'content-length':bytes.length,'content-disposition':`${a.type==='image'||a.type==='audio'?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name).replace(/'/g,'%27')}`,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"});res.end(bytes);} })) return;
     if (await connections({ path, req, res, url, auth, reply })) return;
@@ -236,11 +244,12 @@ const app = http.createServer(async (req, res) => {
         u.id,
         Date.now() + 604800000,
       );
+      db.prepare('INSERT OR REPLACE INTO session_info VALUES(?,?,?,?)').run(t,String(req.headers['user-agent']||'').slice(0,500),req.socket.remoteAddress||'',new Date().toISOString());
       res.setHeader(
         "Set-Cookie",
         `ik_session=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${process.env.SECURE_COOKIE === "1" ? "; Secure" : ""}`,
       );
-      return reply({ token: t, user: publicUser(u) });
+      return reply({ token: t, user: {...publicUser(u),denny:profiles.get(u.id).denny,polychrome:profiles.get(u.id).polychrome} });
     }
     if (path === "/v1/auth/logout" && req.method === "POST") {
       db.prepare("DELETE FROM sessions WHERE token=?").run(token || "");
@@ -250,12 +259,12 @@ const app = http.createServer(async (req, res) => {
       );
       return reply({ ok: true });
     }
-    if (path === "/v1/me") return reply(publicUser(auth()));
+    if (path === "/v1/me") {const u=auth(),p=profiles.get(u.id);return reply({...publicUser(u),denny:p.denny,polychrome:p.polychrome});}
     if (path === "/v1/categories") return reply(SEED_CATEGORIES);
     if (path === "/v1/me/profile") {
       auth();
       if (req.method === 'PATCH') { const patch=await body(req); if(Object.keys(patch).some(k=>!['bio','hidden'].includes(k))||!validateProfile(patch))throw fail(400,'无效个人资料');profiles.set(user.id,patch); }
-      return reply({ ...profiles.get(user.id), avatar: { url: publicUser(user).avatarUrl } });
+      return reply({ ...profiles.get(user.id), pinnedPostIds:community.pins(user.id), avatar: { url: publicUser(user).avatarUrl } });
     }
     if (path === "/v1/me/exp") {
       auth();
@@ -272,7 +281,7 @@ const app = http.createServer(async (req, res) => {
       if(p.hidden&&!self&&!admin.isAdmin(user))return reply({id,username:me.name,isHidden:true,isSelf:false});
       const posts=db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft');
       const {denny,polychrome,...publicProfile}=p;
-      return reply({...me,username:me.name,login:target.username,avatar:{url:me.avatarUrl},...publicProfile,...(self||admin.isAdmin(user)?{denny,polychrome}:{}),isSelf:self,isHidden:p.hidden,stats:{postCount:posts.length,commentCount:db.prepare("SELECT count(*) n FROM comments WHERE json_extract(data,'$.authorId')=?").get(id).n,totalViews:posts.reduce((sum,p)=>sum+(p.viewCount||0),0)}});
+      return reply({...me,username:me.name,login:target.username,avatar:{url:me.avatarUrl},...publicProfile,...(self||admin.isAdmin(user)?{denny,polychrome}:{}),isSelf:self,isHidden:p.hidden,pinnedPostIds:community.pins(id),isFollowing:!!user&&community.following(user.id,id),isBlockedByMe:!!user&&community.blocked(user.id,id),hasBlockedMe:!!user&&community.blocked(id,user.id),followerCount:db.prepare("SELECT count(*) n FROM user_follows WHERE peerId=?").get(id).n,followingCount:db.prepare("SELECT count(*) n FROM user_follows WHERE userId=?").get(id).n,stats:{postCount:posts.length,commentCount:db.prepare("SELECT count(*) n FROM comments WHERE json_extract(data,'$.authorId')=?").get(id).n,totalViews:posts.reduce((sum,p)=>sum+(p.viewCount||0),0)}});
     }
     const reactionCount = (id, kind) =>
       Number(
@@ -298,7 +307,9 @@ const app = http.createServer(async (req, res) => {
     };
     const commentView = (c) => ({
       ...c,
-      author: publicUser(
+      isPinned:!!c.pinned,isAccepted:!!c.accepted,
+      ...(c.isAnonymous?{authorId:''}:{}),
+      author: c.isAnonymous ? {id:'',anonymous:true,name:'匿名绳匠',avatarUrl:'/images/default-avatar.webp'} : publicUser(
         SEED_USERS.find((u) => u.id === c.authorId) ||
           db.prepare("SELECT * FROM users WHERE id=?").get(c.authorId) || {
             id: c.authorId,
@@ -330,6 +341,7 @@ const app = http.createServer(async (req, res) => {
         db.prepare(
           "DELETE FROM reactions WHERE userId=? AND targetId=? AND kind=?",
         ).run(user.id, id, kind);
+      if(kind==='like'&&req.method==='PUT')community.award(user.id,'likeGive',1);
       return reply({
         liked: reacted(id, "like"),
         favorited: reacted(id, "favorite"),
@@ -361,14 +373,15 @@ const app = http.createServer(async (req, res) => {
           const parent = JSON.parse(row.data);
           parentId = parent.parentId || parent.id;
         }
-        if (b.isAnonymous)
-          throw fail(400, "暂不支持匿名评论");
+        if('isAnonymous' in b && typeof b.isAnonymous!=='boolean')throw fail(400,'无效匿名设置');
+        if((b.imageIds?.length||0)>community.benefits(user.id).benefits.commentMaxImages)throw fail(400,'超过当前等级的评论图片数量限制');
         const c = {
           id: randomUUID(),
           postId: cm[1],
           authorId: user.id,
           body: b.body,
           images: uploads.resolveImages(b.imageIds||[],user),
+          isAnonymous:b.isAnonymous===true,
           parentId,
           createdAt: new Date().toISOString(),
         };
@@ -377,6 +390,8 @@ const app = http.createServer(async (req, res) => {
           c.postId,
           JSON.stringify(c),
         );
+        community.award(user.id,'createComment',3);
+        const owner=postById(cm[1]).authorId;if(owner!==user.id)activity.notify(owner,'comment','你的委托收到新评论',`/post/${cm[1]}`,`comment:${c.id}`);
         return reply(commentView(c), 201);
       }
       if (req.method === "GET") {
@@ -402,6 +417,7 @@ const app = http.createServer(async (req, res) => {
         .prepare("SELECT * FROM comments WHERE id=?")
         .get(replies[1]);
       if (!row) throw fail(404, "评论不存在");
+      if(postById(row.postId).status==='draft')throw fail(404,'帖子尚未发布');
       return reply({
         items: db
           .prepare("SELECT data FROM comments WHERE postId=?")
@@ -425,6 +441,8 @@ const app = http.createServer(async (req, res) => {
 
     const toPost = (p) => ({
       ...p,
+      ...community.enrich(p,user?.id),
+      ...(p.isAnonymous?{authorId:''}:{}),
       isOwner: p.authorId === user?.id,
       liked: reacted(p.id, "like"),
       favorited: reacted(p.id, "favorite"),
@@ -434,7 +452,7 @@ const app = http.createServer(async (req, res) => {
         .prepare("SELECT count(*) AS n FROM comments WHERE postId=?")
         .get(p.id).n,
       excerpt: p.body.slice(0, 160),
-      author: publicUser(
+      author: p.isAnonymous?{id:'',anonymous:true,name:'匿名绳匠',avatarUrl:'/images/default-avatar.webp'}:publicUser(
         residentAI.author(p.authorId) || SEED_USERS.find((u) => u.id === p.authorId) ||
           db.prepare("SELECT * FROM users WHERE id=?").get(p.authorId) || {
             id: p.authorId,
@@ -450,7 +468,7 @@ const app = http.createServer(async (req, res) => {
     const userPosts=path.match(/^\/v1\/users\/([^/]+)\/posts$/);
     if(userPosts && req.method==='GET') {
       const id=decodeURIComponent(userPosts[1]);if(profiles.get(id).hidden&&user?.id!==id&&!admin.isAdmin(user))throw fail(403,'个人空间未公开');
-      return reply({items:db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft').map(toPost),nextCursor:null});
+      return reply({items:db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft'&&(!p.isAnonymous||user?.id===id)).map(toPost),nextCursor:null});
     }
     if (
       (path === "/v1/posts" ||
@@ -464,6 +482,8 @@ const app = http.createServer(async (req, res) => {
         .all()
         .map((r) => JSON.parse(r.data))
         .filter((p) => p.status !== "draft")
+        .filter(p=>!user||!community.blocked(user.id,p.authorId))
+        .filter(p=>!path.endsWith('/unread') || !community.enrich(p,user?.id).isRead)
         .filter((p) => (p.title + p.body).toLowerCase().includes(q))
         .filter(
           (p) =>
@@ -498,8 +518,7 @@ const app = http.createServer(async (req, res) => {
       if (!admin.settings().postingOpen && !admin.isAdmin(user)) throw fail(403, "发帖暂时关闭");
       auth();
       const b = await body(req);
-      if (b.isAnonymous || b.externalVideos?.length)
-        throw fail(400, "暂不支持匿名及外部视频");
+      if('isAnonymous' in b && typeof b.isAnonymous!=='boolean')throw fail(400,'无效匿名设置');
       if (
         typeof b.title !== "string" ||
         b.title.length > 200 ||
@@ -511,6 +530,8 @@ const app = http.createServer(async (req, res) => {
         title: b.title,
         body: b.body,
         covers: uploads.resolveImages(b.coverIds||[],user),
+        isAnonymous:b.isAnonymous===true,
+        externalVideos:validateVideos(b.externalVideos||[]),
         status: "draft",
         authorId: user.id,
         categoryId:
@@ -521,6 +542,7 @@ const app = http.createServer(async (req, res) => {
         publishedAt: null,
         updatedAt: new Date().toISOString(),
       };
+      community.validatePost(b,user.id);
       insert.run(p.id, JSON.stringify(p));
       return reply(
         { ...p, tags: p.tags.map((t) => ({ slug: t, name: t })) },
@@ -549,23 +571,25 @@ const app = http.createServer(async (req, res) => {
           ...p,
           tags: (p.tags || []).map((t) => ({ slug: t, name: t })),
           covers: p.covers || [],
-          videos: [],
+          videos: p.externalVideos || [],
         });
       if (draftPath[2] === "draft" && req.method === "PUT") {
         const b = await body(req);
-        if (b.isAnonymous || b.externalVideos?.length)
-          throw fail(400, "暂不支持匿名及外部视频");
+        if('isAnonymous' in b && typeof b.isAnonymous!=='boolean')throw fail(400,'无效匿名设置');
         if (
           typeof b.title !== "string" ||
           b.title.length > 200 ||
           typeof b.body !== "string"
         )
           throw fail(400, "无效草稿");
+        community.validatePost(b,user.id);
         const updated = {
           ...p,
           title: b.title,
           body: b.body,
           covers: uploads.resolveImages(b.coverIds||[],user),
+          isAnonymous:b.isAnonymous===true,
+          externalVideos:validateVideos(b.externalVideos||[]),
           categoryId:
             SEED_CATEGORIES.find((c) => c.id === b.categoryId)?.id || null,
           tags: Array.isArray(b.tags)
@@ -591,6 +615,7 @@ const app = http.createServer(async (req, res) => {
           JSON.stringify(p),
           p.id,
         );
+        community.award(user.id,'createPost',4);
         broadcast("post.published", { postId: p.id });
         return reply({ id: p.id });
       }

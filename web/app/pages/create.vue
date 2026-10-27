@@ -301,7 +301,7 @@ async function onVideoDialogConfirm(raw: string) {
   }
 
   const info = await api.getBilibiliInfo(video.bvid || undefined, video.aid || undefined);
-  if (!info?.pic) {
+  if (!info) {
     message.error("获取视频信息失败，请检查链接是否有效");
     return;
   }
@@ -312,7 +312,8 @@ async function onVideoDialogConfirm(raw: string) {
 
   video.cid = typeof cid === 'number' ? cid : null;
   video.embedUrl = buildBilibiliEmbedUrl(video.bvid, video.aid, video.cid, video.p);
-  video.coverUrl = info.pic;
+  video.coverUrl = info.pic || "/images/default-cover.webp";
+  if(!info.pic)message.warning("未取得原站封面，仅保存官方播放器链接；播放仍取决于原站权限。");
   if (info.title) video.title = info.title;
   if (typeof info.duration === 'number') video.duration = info.duration;
 
@@ -1230,41 +1231,17 @@ if (import.meta.client) {
       </div>
     </Transition>
 
-    <header class="commission-masthead"><div><span class="commission-eyebrow">INTER-KNOT / COMMISSION DESK · 02</span><h1>把委托，交给绳网<span>。</span></h1><p>情报、故事与街头的新消息，从这里发出。</p></div><div class="commission-stamp"><b>信号已接通 ↗</b><span>{{ isSavingDraft ? '草稿保存中…' : hasUnsavedChanges ? '有未保存的修改' : '准备好你的下一条消息' }}</span></div></header>
+    <TerminalMasthead title="委托" subtitle="COMPOSE" index="02" description="写下你的情报，交给绳网。" />
+    <div class="compose-toolbar"><NuxtLink to="/">← 返回推送</NuxtLink><span role="status">{{ isSavingDraft ? '正在保存草稿…' : hasUnsavedChanges ? '有尚未保存的修改' : documentId ? '草稿已保存' : '开始一条新委托' }}</span></div>
     <!-- ── Two-Column Body ─────────────────────── -->
     <div class="ik-create-columns">
       <!-- ── Left: Editing Slot + Drafts (ZMenu) ── -->
-      <aside class="ik-create-nav-wrap"><div class="commission-sidebar-label"><span>01 / WORKSPACE</span><b>我的草稿箱</b><small>未发布的想法，先留在这里。</small></div>
-        <z-menu
-          class="ik-create-menu"
-          :model-value="activeMenuKey"
-          @change="onMenuChange"
-        >
-          <!-- Slot #1: Editing -->
-          <z-menu-item :name="EDITING_KEY">
-            <div class="ik-nav-item__content">
-              <span class="ik-nav-item__title">
-                <span class="ik-nav-item__editing-arrow">▶</span>
-                {{ isEditingPublished ? (title.trim() || "编辑委托") : documentId ? "编辑新委托" : (title.trim() || "编辑委托") }}
-              </span>
-              <span v-if="isEditingPublished" class="ik-nav-item__meta">正在编辑已发布的委托</span>
-              <span v-else-if="documentId" class="ik-nav-item__meta">点击开始编辑新委托</span>
-            </div>
-          </z-menu-item>
-
-          <!-- Drafts -->
-          <z-menu-item
-            v-for="draft in drafts"
-            :key="draft.documentId"
-            :name="draft.documentId"
-          >
-            <div class="ik-nav-item__content">
-              <span class="ik-nav-item__title">{{ draft.title || "无标题" }}</span>
-              <span class="ik-nav-item__meta">{{ draftPreviewText(draft) }}</span>
-            </div>
-          </z-menu-item>
-        </z-menu>
-
+      <aside class="ik-create-nav-wrap">
+        <div class="compose-section-heading"><b>草稿箱</b><small>{{drafts.length}} 条草稿</small></div>
+        <nav class="ik-create-menu" aria-label="草稿箱">
+          <button type="button" class="compose-draft" :class="{'is-active':activeMenuKey===EDITING_KEY}" @click="onMenuChange(EDITING_KEY)"><span>＋ 新建委托</span><small>从一个新想法开始</small></button>
+          <button v-for="draft in drafts" :key="draft.documentId" type="button" class="compose-draft" :class="{'is-active':activeMenuKey===draft.documentId}" @click="onMenuChange(draft.documentId)"><span>{{draft.title||'未命名委托'}}</span><small>{{draftPreviewText(draft)||'还没有正文'}}</small></button>
+        </nav>
         <!-- Loading / Empty / Load more -->
         <div v-if="!auth.isLogin" class="ik-nav-empty">请先登录</div>
         <div v-else-if="draftsLoading && !drafts.length" class="ik-nav-empty">
@@ -1283,7 +1260,7 @@ if (import.meta.client) {
       </aside>
 
       <!-- ── Right: Form Panel ───────────────── -->
-      <main class="ik-create-panel"><div class="commission-editor-heading"><span>02 / COMPOSE</span><b>{{ isEditingPublished ? '编辑已发布委托' : '编写一条新委托' }}</b><small>MARKDOWN / RICH TEXT</small></div>
+      <main class="ik-create-panel"><div class="compose-section-heading"><b>{{isEditingPublished?'编辑委托':'发布委托'}}</b><small>文字 / 图片 / 视频</small></div>
         <div class="ik-create-panel__body">
           <!-- ═══ 写作区：标题 + 正文（主内容，无装饰头部） ═══ -->
           <!-- Title field — flat TextField with bottom divider (Flutter desktop style) -->
@@ -4105,320 +4082,247 @@ if (import.meta.client) {
   }
 }
 
-/* Shared lime street-poster language; retain the existing editor and draft actions. */
+/* Composition uses the exact homepage masthead and card material tokens. */
 .ik-create-page {
-  height: calc(100dvh - 92px);
-  gap: 18px;
-  padding-top: 18px;
+  width: min(1600px, calc(100% - 48px));
+  height: auto;
+  min-height: calc(100dvh - 142px);
+  padding: 24px 0 32px;
+  gap: 20px;
 }
-.commission-masthead {
-  position: relative;
-  isolation: isolate;
+.ik-create-page > .ik-terminal-masthead {
   flex-shrink: 0;
+  margin-bottom: 0;
+}
+.compose-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 25px 32px;
-  background: #d7fa00;
-  color: #12170b;
-  border-radius: 24px 0 24px 24px;
-  overflow: hidden;
-  border: 3px solid #090c06;
-}
-.commission-masthead:after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  right: 15%;
-  top: -70%;
-  width: 180px;
-  height: 300%;
-  transform: rotate(28deg);
-  background: repeating-linear-gradient(
-    90deg,
-    transparent 0 12px,
-    #161d0b0c 12px 14px
-  );
-}
-.commission-eyebrow {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 2px;
-}
-.commission-masthead h1 {
-  font-size: clamp(26px, 3.3vw, 48px);
-  line-height: 1.1;
-  margin: 12px 0 8px;
-  font-weight: 950;
-  letter-spacing: -2px;
-}
-.commission-masthead h1 span {
-  color: #fff;
-}
-.commission-masthead p {
-  font-size: 13px;
-  font-weight: 650;
-  margin: 0;
-}
-.commission-stamp {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  text-align: right;
-  flex-shrink: 0;
+  gap: 16px;
+  border-bottom: 2px solid #393c36;
+  padding-bottom: 16px;
   font-size: 12px;
+  color: var(--ik-muted);
 }
-.commission-stamp b {
-  background: #151b0e;
-  color: #d7fa00;
-  border-radius: 999px;
-  padding: 10px 18px;
-  font-size: 15px;
+.compose-toolbar a {
+  color: #c6c8bd;
+  text-decoration: none;
 }
-.commission-stamp span {
-  font-size: 11px;
+.compose-toolbar a:hover {
+  color: var(--ik-primary);
 }
 .ik-create-columns {
-  grid-template-columns: 250px minmax(0, 1fr);
-  gap: 20px;
+  flex: initial;
+  grid-template-columns: 248px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.ik-create-nav-wrap,
+.ik-create-panel,
+.ik-create-mobile {
+  background: var(--ik-post-card-inner-bg);
+  border: 1px solid #484b43;
+  box-shadow: 3px 4px 0 #050605;
+  border-radius: var(--ik-post-card-radius);
+  padding: 0;
+  overflow: hidden;
 }
 .ik-create-nav-wrap {
-  background: #1d201a;
-  border: 2px solid #373d30;
-  border-radius: 22px 0 22px 22px;
-  overflow: hidden;
-  padding: 12px;
+  gap: 0;
 }
-.commission-sidebar-label {
+.compose-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 62px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #45473f;
+  background: #202220;
+  color: #efefec;
+}
+.compose-section-heading b {
+  font-size: 17px;
+}
+.compose-section-heading small {
+  font-size: 11px;
+  color: #92958b;
+  font-weight: 400;
+}
+.ik-create-menu {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.compose-draft {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  padding: 12px 8px 19px;
-  border-bottom: 1px solid #3f4636;
-  margin-bottom: 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 12px 12px 0 12px;
+  background: transparent;
+  color: #e8e8e2;
+  padding: 14px;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
 }
-.commission-sidebar-label span,
-.commission-editor-heading > span {
-  color: #d7fa00;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 2px;
-}
-.commission-sidebar-label b {
-  color: #f1f4e9;
-  font-size: 22px;
-}
-.commission-sidebar-label small {
-  color: #979f8c;
+.compose-draft small {
   font-size: 11px;
+  color: #92958b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
-.ik-create-menu :deep(.z-menu__item) {
-  border-radius: 12px !important;
-  margin: 6px 0;
-  border: 1px solid #3b4134;
-  background: #24291f;
+.compose-draft span {
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
-.ik-create-menu :deep(.z-menu__item.is-active) {
-  background: #d7fa00 !important;
-  color: #151c0b !important;
+.compose-draft.is-active {
+  background: #32352c;
+  border-color: #6c754d;
 }
-.ik-create-menu :deep(.z-menu__item.is-active) .ik-nav-item__title,
-.ik-create-menu :deep(.z-menu__item.is-active) .ik-nav-item__meta {
-  color: #151c0b;
+.compose-draft.is-active span {
+  color: var(--ik-primary);
 }
-.ik-create-panel {
-  background: #20241c;
-  border: 2px solid #3e4536;
-  padding: 0;
-  border-radius: 22px 0 22px 22px;
-}
-.commission-editor-heading {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 17px 24px;
-  border-bottom: 1px solid #3e4536;
-  background: #22271d;
-  flex-shrink: 0;
-}
-.commission-editor-heading b {
-  color: #f1f4e9;
-  font-size: 16px;
-}
-.commission-editor-heading small {
-  margin-left: auto;
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: #949d86;
+.compose-draft:not(.is-active):hover {
+  border-color: #858585;
+  background: transparent;
 }
 .ik-create-panel__body {
   border: 0;
   border-radius: 0;
-  background: #191c16;
-  padding: 24px 28px;
+  background: var(--ik-post-card-inner-bg);
+  padding: 26px;
+  overflow: visible;
+  gap: 22px;
 }
 .ik-create-section--title {
-  border-bottom: 1px solid #465038;
-  padding-bottom: 16px;
+  border-bottom: 1px solid #45473f;
+  padding-bottom: 18px;
 }
 .ik-create-title-input :deep(.z-textarea__inner) {
-  font-size: 28px !important;
-  font-weight: 800 !important;
-  line-height: 1.4 !important;
-  color: #edf1e5 !important;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.4;
+  color: #efefec;
+}
+.ik-create-section--body {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 .ik-create-editor-frame {
-  border: 1px solid #3d4731;
-  border-radius: 14px;
-  background: #141710;
+  flex: none;
+  min-height: 360px;
+  border: 1px solid #484b43;
+  border-radius: 14px 14px 0 14px;
   overflow: hidden;
 }
+.ik-create-config {
+  border-top: 1px solid #45473f;
+}
+.ik-create-config__divider {
+  display: none;
+}
 .ik-create-config__divider-text {
-  color: #d7fa00;
+  color: #b2b4ae;
 }
 .ik-create-field__label {
-  color: #ced5c0;
+  color: #b2b4ae;
 }
 .ik-create-footer {
+  position: sticky;
+  bottom: 12px;
+  background: #080808 url("/images/tab-bg-point.webp") repeat;
+  border: 3px solid #313131;
+  border-radius: 999px;
+  box-shadow: 0 4px 0 #050605;
   width: 100%;
-  background: #1b2016;
-  border: 2px solid #3a432e;
-  border-radius: 18px 0 18px 18px;
 }
 .ik-create-footer__inner {
-  width: calc(100% - 32px);
   min-height: 66px;
-}
-@media (max-width: 768px) {
-  .ik-create-page {
-    height: auto;
-    margin: 0 auto;
-    min-height: calc(100dvh - 80px);
-    width: calc(100% - 20px);
-    gap: 12px;
-    padding-top: 10px;
-    padding-bottom: 90px;
-  }
-  .commission-masthead {
-    padding: 20px 18px;
-    border-radius: 18px 0 18px 18px;
-    gap: 12px;
-  }
-  .commission-masthead h1 {
-    font-size: 27px;
-    letter-spacing: -1px;
-  }
-  .commission-eyebrow {
-    font-size: 8px;
-    letter-spacing: 1px;
-  }
-  .commission-masthead p {
-    font-size: 11px;
-  }
-  .commission-stamp {
-    display: none;
-  }
-  .commission-editor-heading {
-    padding: 13px 16px;
-    gap: 12px;
-  }
-  .commission-editor-heading small {
-    display: none;
-  }
-  .ik-create-columns {
-    display: block;
-    flex: initial;
-  }
-  .ik-create-nav-wrap {
-    display: none;
-  }
-  .ik-create-panel__body {
-    padding: 18px 14px;
-  }
-  .ik-create-title-input :deep(.z-textarea__inner) {
-    font-size: 23px !important;
-  }
-  .ik-create-footer {
-    display: none;
-  }
-}
-@media (max-width: 768px) {
-  .ik-create-mobile {
-    background: #191e14;
-    border: 2px solid #3c4730;
-    border-radius: 18px 0 18px 18px;
-    min-height: initial;
-  }
-  .ik-mobile-title-input {
-    font-size: 25px;
-    color: #edf1e5;
-    background: transparent;
-    font-weight: 800;
-  }
-  .ik-mobile-body-input {
-    background: transparent;
-    color: #d4ddc7;
-  }
-  .ik-mobile-row {
-    background: #20271a;
-    color: #d4ddc7;
-    border-bottom: 1px solid #3a452e;
-  }
-  .ik-mobile-row__icon {
-    color: #d7fa00;
-  }
-  .ik-mobile-cover-add {
-    background: #222c17;
-    border-color: #687d43;
-  }
-  .ik-mobile-footer {
-    background: #181f11;
-    border-top: 2px solid #3e4b2c;
-  }
-  .ik-mobile-footer__publish {
-    background: #d7fa00;
-    color: #161d0c;
-  }
-}
-.ik-create-menu.z-menu {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-  backdrop-filter: none;
-}
-.ik-create-menu.z-menu::after {
-  display: none;
-}
-.ik-create-menu :deep(.z-menu__prefix),
-.ik-create-menu :deep(.z-menu__suffix) {
-  display: none;
-}
-.ik-create-menu :deep(.z-menu__scrollbar) {
-  margin: 0;
-  outline: 0;
-  border-radius: 0;
-}
-.ik-create-menu :deep(.z-menu__content) {
-  padding: 0;
-}
-.ik-create-menu :deep(.z-menu__item) {
-  border-radius: 10px 0 10px 10px;
-  margin-bottom: 9px;
-  border: 1px solid #4b5738;
-  background: #252d1c;
-}
-.ik-create-menu :deep(.z-menu__item::after) {
-  display: none;
-}
-.ik-create-menu :deep(.z-menu__item.is-active) {
-  animation: none;
-  background: #d7fa00;
-  color: #151b0e;
-  border-color: #d7fa00;
+  padding: 10px 22px;
+  width: 100%;
 }
 .ik-create-panel :deep(.post-body-editor__source) {
   font-family: "InterKnot Sans", sans-serif;
+  min-height: 300px;
+}
+.ik-create-page :deep(.post-body-editor) {
+  background: #1a1c19;
+  border-color: #484b43;
+}
+.ik-create-page :deep(.post-body-editor__tabs) {
+  background: #202220;
+  border-color: #45473f;
+}
+.ik-create-page :deep(.post-body-editor__source),
+.ik-create-page :deep(.post-body-editor__rich),
+.ik-create-page :deep(.post-body-editor__preview) {
+  background: #191b18;
+}
+@media (max-width: 1024px) {
+  .ik-create-page {
+    width: calc(100% - 32px);
+    padding-top: 16px;
+  }
+  .ik-create-columns {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+@media (max-width: 768px) {
+  .ik-create-page {
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    padding: 15px 0 90px;
+    gap: 16px;
+    min-height: calc(100dvh - 62px);
+    background: transparent;
+  }
+  .compose-toolbar {
+    font-size: 11px;
+    padding: 0 4px 12px;
+  }
+  .ik-create-mobile {
+    min-height: 0;
+    background: var(--ik-post-card-inner-bg);
+  }
+  .ik-mobile-title-input {
+    background: transparent;
+    font-size: 25px;
+    font-weight: 800;
+    color: #efefec;
+  }
+  .ik-mobile-row {
+    background: #202220;
+    border-color: #45473f;
+  }
+  .ik-mobile-cover-add {
+    background: #202220;
+    border-color: #60635b;
+  }
+  .ik-mobile-cover-add:active:not(:disabled) {
+    background: #292c25;
+  }
+  .ik-mobile-footer {
+    border-top: 2px solid #45473f;
+    background: #080808 url("/images/tab-bg-point.webp") repeat;
+  }
+  .ik-mobile-body-input {
+    background: transparent;
+  }
+  .ik-create-page :deep(.post-body-editor__source) {
+    min-height: 260px;
+  }
+  .ik-create-page > .ik-terminal-masthead {
+    margin-bottom: 0;
+  }
 }
 </style>

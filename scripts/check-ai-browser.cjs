@@ -131,6 +131,12 @@ const fs = require("node:fs"),
       await p.locator(".local-auth .connect").click();
       await p.locator(".local-auth").waitFor({ state: "hidden" });
       await p.locator(".home-account-tools").waitFor();
+      const reminder = p
+        .locator(".ik-overlay")
+        .filter({ has: p.locator(".ik-cir__reward") });
+      await reminder.waitFor({ state: "visible" });
+      await reminder.getByRole("button", { name: "关闭", exact: true }).click();
+      await reminder.waitFor({ state: "hidden" });
     }
     assert.equal(
       (
@@ -386,8 +392,38 @@ const fs = require("node:fs"),
     });
     console.log("PASS site image upload and saved appearance");
     await admin.setViewportSize({ width: 1440, height: 1000 });
+    await admin.goto(base);
+    const mastheadStyle = await admin
+      .locator(".ik-terminal-masthead")
+      .evaluate((el) => {
+        const s = getComputedStyle(el),
+          h = getComputedStyle(el.querySelector("h1"));
+        return {
+          background: s.backgroundColor,
+          radius: s.borderRadius,
+          border: s.borderColor,
+          font: h.fontFamily,
+          weight: h.fontWeight,
+        };
+      });
     await admin.goto(base + "/create");
-    await admin.locator(".commission-masthead h1").waitFor();
+    const composeStyle = await admin
+      .locator(".ik-terminal-masthead")
+      .evaluate((el) => {
+        const s = getComputedStyle(el),
+          h = getComputedStyle(el.querySelector("h1"));
+        return {
+          background: s.backgroundColor,
+          radius: s.borderRadius,
+          border: s.borderColor,
+          font: h.fontFamily,
+          weight: h.fontWeight,
+        };
+      });
+    assert.deepEqual(composeStyle, mastheadStyle);
+    console.log("PASS commission and homepage share exact masthead styling");
+
+    await admin.locator(".ik-terminal-masthead h1").waitFor();
     await admin
       .locator(".ik-create-panel .post-body-editor input[type=file]")
       .setInputFiles(imageFile);
@@ -417,6 +453,40 @@ const fs = require("node:fs"),
     console.log(
       "PASS desktop and mobile commission workspace runtime, no horizontal overflow",
     );
+    const me = await (await admin.request.get(base + "/v1/me")).json();
+    const missing = [];
+    const capture = (r) => {
+      if (r.status() === 404 && new URL(r.url()).pathname.startsWith("/v1/"))
+        missing.push(new URL(r.url()).pathname);
+    };
+    admin.on("response", capture);
+    for (const path of [
+      "/level",
+      "/account",
+      "/profile/" + me.id,
+      "/messages",
+      "/activity",
+    ]) {
+      await admin.goto(base + path);
+      await admin.waitForLoadState("networkidle");
+    }
+    admin.off("response", capture);
+    assert.deepEqual(missing, []);
+    console.log(
+      "PASS account, level, profile, messaging, activity pages have no missing requested API routes",
+    );
+    await admin.getByLabel("日程标题", { exact: true }).fill("浏览器日程测试");
+    await admin.getByRole("button", { name: "添加日程", exact: true }).click();
+    await admin.getByText("浏览器日程测试", { exact: true }).waitFor();
+    await admin.reload();
+    await admin.getByText("浏览器日程测试", { exact: true }).waitFor();
+    assert.equal(
+      await admin.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    console.log("PASS private task UI save/reload and mobile layout");
   } catch (e) {
     console.error(e);
     process.exitCode = 1;

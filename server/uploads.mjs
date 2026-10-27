@@ -29,7 +29,7 @@ export function createUploads(db, profiles) {
   function resolveImages(ids, user) {
     if (
       !Array.isArray(ids) ||
-      ids.length > 9 ||
+      ids.length > 40 ||
       ids.some((id) => typeof id !== "string")
     )
       throw fail(400, "图片列表无效");
