@@ -1,7 +1,7 @@
 {
   "scope": "useApi.ts路径级静态盘点；不覆盖所有旧敲敲调用，也不是端到端测试报告",
   "generatedBy": "node scripts/audit-api-contracts.mjs",
-  "total": 77,
+  "total": 78,
   "entries": [
     {
       "route": "/v1/auth/email-codes",
@@ -149,6 +149,12 @@
     },
     {
       "route": "/v1/me/blocks",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/card",
       "source": "web/app/composables/useApi.ts",
       "status": "implemented-path-needs-method-level-verification",
       "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"

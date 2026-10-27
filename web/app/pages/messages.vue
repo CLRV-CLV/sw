@@ -639,14 +639,14 @@ watch(
       <h1>敲敲</h1>
       <p>私聊 / 群聊 · 好友 · 聊天记录搜索</p>
     </header>
-    <button v-if="!auth.isLogin" @click="login.open()">登录后使用敲敲</button>
+    <IkActionButton v-if="!auth.isLogin" @click="login.open()">登录后使用敲敲</IkActionButton>
     <p v-if="error" role="alert">
-      {{ error }} <button @click="error = ''">关闭提示</button>
+      {{ error }} <IkActionButton @click="error = ''">关闭提示</IkActionButton>
     </p>
     <p v-if="notice" role="status">
-      {{ notice }} <button @click="notice = ''">关闭提示</button>
+      {{ notice }} <IkActionButton @click="notice = ''">关闭提示</IkActionButton>
     </p>
-    <nav v-if="auth.isLogin" class="message-modes"><button :aria-pressed="!aiMode" @click="aiMode=false">联系人 / 群聊</button><button :aria-pressed="aiMode" @click="aiMode=true">驻站角色AI</button></nav><ResidentAIChat v-if="auth.isLogin&&aiMode"/><div v-if="auth.isLogin&&!aiMode" class="workspace">
+    <nav v-if="auth.isLogin" class="message-modes"><IkActionButton type="button" :primary="!aiMode" :aria-pressed="!aiMode" @click="aiMode=false">联系人 / 群聊</IkActionButton><IkActionButton type="button" :primary="aiMode" :aria-pressed="aiMode" @click="aiMode=true">驻站角色AI</IkActionButton></nav><ResidentAIChat v-if="auth.isLogin&&aiMode"/><div v-if="auth.isLogin&&!aiMode" class="workspace">
       <aside>
         <h2>通讯录</h2>
         <form @submit.prevent="search">
@@ -654,24 +654,22 @@ watch(
             v-model="query"
             aria-label="搜索用户"
             placeholder="账号或昵称"
-          /><button>查找</button>
+          /><IkActionButton>查找</IkActionButton>
         </form>
         <div class="contact-list">
           <div v-for="p in contacts" :key="p.id" class="contact">
-            <button @click="start(p)">
+            <IkActionButton @click="start(p)">
               <img :src="p.avatarUrl" alt="" />{{ p.name
-              }}<small>Lv.{{ p.level }}</small></button
-            ><button
+              }}<small>Lv.{{ p.level }}</small></IkActionButton><IkActionButton
               @click="requestFriend(p)"
               :aria-label="`添加 ${p.name} 为好友`"
             >
-              ＋好友</button
-            ><button
+              ＋好友</IkActionButton><IkActionButton
               @click="friendSettings(p, { blocked: true })"
               :aria-label="`屏蔽 ${p.name}`"
             >
               屏蔽
-            </button>
+            </IkActionButton>
           </div>
         </div>
         <details>
@@ -679,8 +677,7 @@ watch(
           <h3>好友申请</h3>
           <div v-for="r in requests" :key="r.id">
             <b>{{ r.user.name }}</b
-            ><button @click="respond(r, true)">接受</button
-            ><button @click="respond(r, false)">拒绝</button>
+            ><IkActionButton @click="respond(r, true)">接受</IkActionButton><IkActionButton @click="respond(r, false)">拒绝</IkActionButton>
           </div>
           <p v-if="!requests.length">暂无待处理申请</p>
           <h3>好友列表</h3>
@@ -689,26 +686,22 @@ watch(
             :key="f.peerId"
             class="friend"
           >
-            <button @click="start(f.user)">{{ f.remark || f.user.name }}</button
-            ><small>{{ f.groupName || "未分组" }}</small
-            ><button @click="remark(f)">备注</button
-            ><button @click="moveFriend(f)">分组</button
-            ><button @click="deleteFriend(f)">删除</button
-            ><button @click="friendSettings(f.user, { blocked: true })">
+            <IkActionButton @click="start(f.user)">{{ f.remark || f.user.name }}</IkActionButton><small>{{ f.groupName || "未分组" }}</small
+            ><IkActionButton @click="remark(f)">备注</IkActionButton><IkActionButton @click="moveFriend(f)">分组</IkActionButton><IkActionButton @click="deleteFriend(f)">删除</IkActionButton><IkActionButton @click="friendSettings(f.user, { blocked: true })">
               加入黑名单
-            </button>
+            </IkActionButton>
           </div>
           <h3>黑名单</h3>
           <div v-for="f in friends.filter((f) => f.blocked)" :key="f.peerId">
             {{ f.user.name
-            }}<button @click="friendSettings(f.user, { blocked: false })">
+            }}<IkActionButton @click="friendSettings(f.user, { blocked: false })">
               解除屏蔽
-            </button>
+            </IkActionButton>
           </div>
         </details>
-        <button @click="groupPanel = !groupPanel">
+        <IkActionButton @click="groupPanel = !groupPanel">
           {{ groupPanel ? "取消建群" : "新建群聊" }}
-        </button>
+        </IkActionButton>
         <form
           v-if="groupPanel"
           class="group-form"
@@ -727,15 +720,15 @@ watch(
             ><input v-model="groupIds" type="checkbox" :value="p.id" />{{
               p.name
             }}</label
-          ><button
+          ><IkActionButton
             :disabled="groupBusy || !groupIds.length || !groupTitle.trim()"
           >
             创建群聊
-          </button>
+          </IkActionButton>
         </form>
         <h2>最近会话</h2>
-        <button @click="refresh()">刷新会话</button>
-        <button
+        <IkActionButton @click="refresh()">刷新会话</IkActionButton>
+        <IkActionButton
           v-for="c in entries"
           :key="c.key"
           class="conversation"
@@ -756,18 +749,16 @@ watch(
             >{{ c.unreadCount ? `${c.unreadCount} 未读` : "已读" }}
             {{ c.muted ? "· 免打扰" : "" }}</small
           >
-        </button>
-        <button v-if="inboxCursor" @click="refresh(true)">更多会话</button>
+        </IkActionButton>
+        <IkActionButton v-if="inboxCursor" @click="refresh(true)">更多会话</IkActionButton>
       </aside>
       <article>
         <template v-if="active">
           <header>
             <h2>{{ active.peer.name }}</h2>
-            <button @click="preference('pinned')">
-              {{ active.pinned ? "取消置顶" : "置顶" }}</button
-            ><button @click="preference('muted')">
-              {{ active.muted ? "取消免打扰" : "免打扰" }}</button
-            ><NuxtLink
+            <IkActionButton @click="preference('pinned')">
+              {{ active.pinned ? "取消置顶" : "置顶" }}</IkActionButton><IkActionButton @click="preference('muted')">
+              {{ active.muted ? "取消免打扰" : "免打扰" }}</IkActionButton><NuxtLink
               v-if="active.conversationKind === 'direct'"
               :to="`/profile/${active.peer.id}`"
               >个人空间</NuxtLink
@@ -778,24 +769,21 @@ watch(
             <p>
               新加入的成员只能读取加入后的消息；群主可邀请、移除、转让和解散。
             </p>
-            <button v-if="groupOwner" @click="renameGroup">修改群名</button
-            ><button v-if="groupOwner" @click="dissolve">解散群聊</button>
+            <IkActionButton v-if="groupOwner" @click="renameGroup">修改群名</IkActionButton><IkActionButton v-if="groupOwner" @click="dissolve">解散群聊</IkActionButton>
             <div v-for="p in groupInfo.members" :key="p.id">
               <NuxtLink :to="`/profile/${p.id}`">{{ p.name }}</NuxtLink
               ><small>{{ p.id === groupInfo.ownerId ? " · 群主" : "" }}</small
-              ><button
+              ><IkActionButton
                 v-if="p.id === me && p.id !== groupInfo.ownerId"
                 @click="removeMember(p)"
               >
-                退出群聊</button
-              ><template v-if="groupOwner && p.id !== me"
-                ><button @click="removeMember(p)">移出</button
-                ><button @click="transfer(p)">转让群主</button></template
+                退出群聊</IkActionButton><template v-if="groupOwner && p.id !== me"
+                ><IkActionButton @click="removeMember(p)">移出</IkActionButton><IkActionButton @click="transfer(p)">转让群主</IkActionButton></template
               >
             </div>
             <div v-if="groupOwner">
               <h3>邀请成员</h3>
-              <button
+              <IkActionButton
                 v-for="p in contacts.filter(
                   (p) => !groupInfo?.members.some((m) => m.id === p.id),
                 )"
@@ -803,7 +791,7 @@ watch(
                 @click="invite(p)"
               >
                 邀请 {{ p.name }}
-              </button>
+              </IkActionButton>
             </div>
           </details>
           <details v-if="pinnedMessages.length" class="pinned-messages">
@@ -811,12 +799,12 @@ watch(
             <blockquote v-for="m in pinnedMessages" :key="m.id">
               <small>{{ m.sender?.name }}</small>
               <p>{{ m.content }}</p>
-              <button
+              <IkActionButton
                 v-if="active.conversationKind === 'direct' || groupOwner"
                 @click="pinMessage(m, true)"
               >
                 取消消息置顶
-              </button>
+              </IkActionButton>
             </blockquote>
           </details>
           <p v-if="active.conversationKind === 'channel' && !groupOwner">
@@ -828,19 +816,17 @@ watch(
               aria-label="搜索聊天记录"
               maxlength="100"
               placeholder="搜索本会话消息"
-            /><button>搜索记录</button
-            ><button v-if="searching" type="button" @click="searching = false">
+            /><IkActionButton>搜索记录</IkActionButton><IkActionButton v-if="searching" type="button" @click="searching = false">
               返回聊天
-            </button>
+            </IkActionButton>
           </form>
-          <button v-if="!searching && cursor" @click="timeline(true)">
-            加载更早消息</button
-          ><button
+          <IkActionButton v-if="!searching && cursor" @click="timeline(true)">
+            加载更早消息</IkActionButton><IkActionButton
             v-if="searching && searchCursor"
             @click="searchMessages(true)"
           >
             更多搜索结果
-          </button>
+          </IkActionButton>
           <div ref="timelineBox" class="timeline" aria-live="polite">
             <div
               v-for="m in visibleMessages"
@@ -880,24 +866,21 @@ watch(
                 ></template
               >
               <div v-if="!m.withdrawnAt">
-                <button
+                <IkActionButton
                   @click="
                     quoting = m;
                     searching = false;
                   "
                 >
-                  引用</button
-                ><button
+                  引用</IkActionButton><IkActionButton
                   v-if="
                     (active.conversationKind === 'direct' || groupOwner) &&
                     !pinnedMessages.some((p) => p.id === m.id)
                   "
                   @click="pinMessage(m)"
                 >
-                  置顶消息</button
-                ><template v-if="m.senderId === me"
-                  ><button @click="change(m)">编辑</button
-                  ><button @click="change(m, true)">撤回</button></template
+                  置顶消息</IkActionButton><template v-if="m.senderId === me"
+                  ><IkActionButton @click="change(m)">编辑</IkActionButton><IkActionButton @click="change(m, true)">撤回</IkActionButton></template
                 >
               </div>
             </div>
@@ -907,7 +890,7 @@ watch(
           </div>
           <p v-if="quoting">
             引用：{{ quoting.content }}
-            <button @click="quoting = null">取消</button>
+            <IkActionButton @click="quoting = null">取消</IkActionButton>
           </p>
           <div
             v-if="active.conversationKind !== 'channel' || groupOwner"
@@ -919,9 +902,8 @@ watch(
               aria-label="选择附件"
               :disabled="busy || recording"
               @change="fileChosen"
-            /><button :disabled="busy" @click="record">
-              {{ recording ? "停止并发送语音" : "录制语音" }}</button
-            ><small>单文件5MB以内 · 语音最长60秒</small>
+            /><IkActionButton :disabled="busy" @click="record">
+              {{ recording ? "停止并发送语音" : "录制语音" }}</IkActionButton><small>单文件5MB以内 · 语音最长60秒</small>
           </div>
           <form
             v-if="active.conversationKind !== 'channel' || groupOwner"
@@ -934,9 +916,9 @@ watch(
               maxlength="10000"
               placeholder="发送消息…"
               @input="rt.sendTyping(selected)"
-            /><button :disabled="busy || !content.trim()">
+            /><IkActionButton :disabled="busy || !content.trim()">
               {{ busy ? "发送中…" : "发送" }}
-            </button>
+            </IkActionButton>
           </form>
         </template>
         <p v-else>选择通讯录中的用户开始私聊，或新建群聊。</p>
@@ -945,6 +927,8 @@ watch(
   </section>
 </template>
 <style scoped>
+.message-modes{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.message-modes :deep(.z-button){min-height:38px;padding:9px 24px}
+
 .messages {
   max-width: 1500px;
   margin: auto;
@@ -968,7 +952,7 @@ watch(
   border-radius: 22px;
   min-width: 0;
 }
-.messages button {
+.messages button:not(.z-button) {
   background: #22281d;
   color: #dce6cd;
   border: 1px solid #5f6c4b;

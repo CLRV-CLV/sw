@@ -23,6 +23,7 @@ const dossier = Object.fromEntries(
   ]),
 );
 function fixture(env = {}) {
+  env = { ...env, AI_SEED_CATALOG: "1" };
   const dir = mkdtempSync(tmpdir() + "/ik-ai-test-"),
     db = new DatabaseSync(":memory:");
   db.exec(
@@ -65,7 +66,7 @@ function fixture(env = {}) {
       parse: {
         revid: 123,
         text: {
-          "*": `<img class="pi-image-thumbnail" src="https://static.wikia.nocookie.net/zzz/images/f/ff/Test.png"><h2>Agent Intel</h2><p>${"Ellen is a Victoria Housekeeping maid and a student in New Eridu. She carries lollipops and values her companions. ".repeat(18)}</p>`,
+          "*": `<img class="pi-image-thumbnail" src="https://img.moegirl.org.cn/zzz/images/f/ff/Test.png"><h2>Agent Intel</h2><p>${"Ellen is a Victoria Housekeeping maid and a student in New Eridu. She carries lollipops and values her companions. ".repeat(18)}</p>`,
         },
       },
     });
@@ -437,47 +438,46 @@ test("fail-closed provider validation and restart decryption; no raw upstream er
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test("Wiki category discovery follows bounded continuation, filters non-character namespace/paths, stays on fixed host", async () => {
+test("Moegirl catalog validates real character pages and rejects organisations, music and Bangboo", async () => {
   const requests = [];
   const result = await discoverWikiCharacters({
     fetcher: async (raw) => {
       const u = new URL(raw);
       requests.push(u);
-      assert.equal(u.origin, "https://zenless-zone-zero.fandom.com");
-      const category = u.searchParams.get("cmtitle");
-      if (category === "Category:Agents" && !u.searchParams.has("cmcontinue"))
+      assert.equal(u.origin, "https://zh.moegirl.org.cn");
+      if (u.searchParams.get("action") === "query")
         return Response.json({
           query: {
             categorymembers: [
-              { ns: 0, title: "Ellen Joe" },
-              { ns: 0, title: "Agent" },
-              { ns: 0, title: "Ellen Joe/Lore" },
+              { ns: 0, title: "艾莲·乔" },
+              { ns: 0, title: "维多利亚家政" },
+              { ns: 0, title: "邦布" },
+              { ns: 0, title: "歌曲" },
+              { ns: 6, title: "File:X" },
             ],
           },
-          continue: { cmcontinue: "next" },
         });
+      const page = u.searchParams.get("page");
       return Response.json({
-        query: {
-          categorymembers: [
-            {
-              ns: 0,
-              title: category === "Category:Agents" ? "Nicole Demara" : "Fairy",
-            },
-            { ns: 6, title: "File:Secret" },
-          ],
+        parse: {
+          title: page,
+          revid: 1,
+          text: {
+            "*":
+              page === "艾莲·乔"
+                ? "<p>艾莲·乔是米哈游制作的游戏《绝区零》及其衍生作品的登场角色。</p>"
+                : "<p>这是绝区零中的组织或音乐。</p>",
+          },
         },
       });
     },
   });
   assert.deepEqual(
     result.items.map((r) => r.wiki),
-    ["Ellen Joe", "Nicole Demara"],
-  );
-  assert.equal(requests.length, 2);
-  assert.ok(
-    requests.every((u) => u.searchParams.get("cmtitle") === "Category:Agents"),
+    ["艾莲·乔"],
   );
   assert.equal(result.truncated, false);
+  assert.equal(requests.length, 4);
 });
 test("AI site budget applies across accounts; editing dossier invalidates approval; missing wiki approval cannot be bypassed", async () => {
   const f = fixture({ AI_DAILY_CHAT_LIMIT: "1" });
@@ -523,7 +523,7 @@ test("manual Wiki fallback is admin-only, explicitly labelled, resets activation
     await assert.rejects(
       f.call("alice", "/v1/admin/ai/roles/ellen-joe/wiki-text", "PUT", {
         text,
-        part: "Lore",
+        part: "",
       }),
       { status: 403 },
     );
@@ -538,7 +538,7 @@ test("manual Wiki fallback is admin-only, explicitly labelled, resets activation
       "admin",
       "/v1/admin/ai/roles/ellen-joe/wiki-text",
       "PUT",
-      { text, part: "Lore", revision: 123 },
+      { text, part: "", revision: 123 },
     );
     assert.equal(result.verification, "administrator-provided-not-fetched");
     const r = (await f.call("admin", "/v1/admin/ai/roles")).items.find(
@@ -703,9 +703,9 @@ test("provider accepts full endpoint, optional response_format and fenced JSON w
 test("Wiki portrait accepts infobox image only from trusted raster CDN, not page icons or executable URLs", () => {
   assert.equal(
     wikiPortrait(
-      '<img src="https://evil.test/a.png"><img class="pi-image-thumbnail" data-src="https://static.wikia.nocookie.net/zzz/images/a/a1/Ellen.png?x=1&amp;y=2">',
+      '<img src="https://evil.test/a.png"><img class="pi-image-thumbnail" data-src="https://img.moegirl.org.cn/zzz/images/a/a1/Ellen.png?x=1&amp;y=2">',
     ),
-    "https://static.wikia.nocookie.net/zzz/images/a/a1/Ellen.png?x=1&y=2",
+    "https://img.moegirl.org.cn/zzz/images/a/a1/Ellen.png?x=1&y=2",
   );
   assert.equal(
     wikiPortrait('<img class="pi-image-thumbnail" src="javascript:alert(1)">'),
@@ -745,10 +745,10 @@ test("automatic Wiki avatars preserve manual overrides; separate refresh keeps a
     const role = (await f.call("admin", "/v1/admin/ai/roles")).items.find(
       (r) => r.id === "ellen-joe",
     );
-    assert.match(role.avatarUrl, /static.wikia.nocookie.net/);
+    assert.match(role.avatarUrl, /img.moegirl.org.cn/);
     assert.equal(role.approved, true);
     assert.equal(role.enabled, true);
-    assert.match(f.ai.author("ai:ellen-joe").avatarUrl, /static.wikia/);
+    assert.match(f.ai.author("ai:ellen-joe").avatarUrl, /img.moegirl/);
     const batch = await f.call("admin", "/v1/admin/ai/avatar-sync", "POST", {
       clientId: "zh-batch",
     });
@@ -947,6 +947,243 @@ test("bulk Wiki jobs respect available queue capacity and return every unqueued 
       { status: 429 },
     );
   } finally {
+    f.close();
+  }
+});
+
+test("Moegirl upgrade forcibly clears every old role exactly once and keeps posts/chat history", () => {
+  const f = fixture();
+  let upgraded;
+  try {
+    f.ai.close();
+    f.db
+      .prepare("DELETE FROM ai_migrations WHERE key='moegirl-catalog-v1'")
+      .run();
+    f.db
+      .prepare("INSERT INTO posts VALUES(?,?)")
+      .run(
+        "historical",
+        JSON.stringify({
+          id: "historical",
+          authorId: "ai:ellen-joe",
+          body: "kept",
+        }),
+      );
+    f.db
+      .prepare("INSERT INTO ai_messages VALUES(?,?,?,?,?,?)")
+      .run(
+        "historical-chat",
+        "alice",
+        "ellen-joe",
+        "user",
+        "kept",
+        new Date().toISOString(),
+      );
+    const admin = { isAdmin: () => true, banned: () => false };
+    upgraded = createResidentAI(f.db, { admin, dataDir: f.dir, env: {} });
+    assert.equal(f.db.prepare("SELECT count(*) n FROM ai_roles").get().n, 0);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM posts").get().n, 1);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM ai_messages").get().n, 1);
+    f.db
+      .prepare("INSERT INTO ai_roles VALUES(?,?)")
+      .run(
+        "new-role",
+        JSON.stringify({
+          id: "new-role",
+          wiki: "艾莲·乔",
+          sourceProvider: "moegirl",
+        }),
+      );
+    upgraded.close();
+    upgraded = createResidentAI(f.db, { admin, dataDir: f.dir, env: {} });
+    assert.equal(f.db.prepare("SELECT count(*) n FROM ai_roles").get().n, 1);
+  } finally {
+    upgraded?.close();
+    f.close();
+  }
+});
+test("running task cancellation aborts transport and cannot be overwritten; completed logs can be deleted", async () => {
+  const f = fixture();
+  let ai;
+  try {
+    await f.ready();
+    f.ai.close();
+    let started,
+      aborted = false;
+    const ready = new Promise((r) => (started = r));
+    ai = createResidentAI(f.db, {
+      admin: { isAdmin: (u) => u.id === "admin", banned: () => false },
+      dataDir: f.dir,
+      env: {},
+      fetcher: async (_, options) => {
+        started();
+        return new Promise((resolve, reject) =>
+          options.signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(options.signal.reason);
+            },
+            { once: true },
+          ),
+        );
+      },
+    });
+    const call = async (uid, path, method = "GET", data = {}) => {
+      let result;
+      await ai.handler({
+        path,
+        url: new URL(path, "http://test"),
+        req: { method },
+        auth: () => ({ id: uid }),
+        body: async () => data,
+        reply: (r) => (result = r),
+      });
+      return result;
+    };
+    const job = await call("admin", "/v1/admin/ai/test", "POST", {
+      clientId: "cancel-me",
+    });
+    await ready;
+    await assert.rejects(
+      call("alice", `/v1/admin/ai/jobs/${job.id}/cancel`, "POST"),
+      { status: 403 },
+    );
+    await assert.rejects(
+      call("admin", `/v1/admin/ai/jobs/${job.id}`, "DELETE"),
+      { status: 409 },
+    );
+    await call("admin", `/v1/admin/ai/jobs/${job.id}/cancel`, "POST");
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(aborted, true);
+    assert.equal(
+      f.db.prepare("SELECT state FROM ai_jobs WHERE id=?").get(job.id).state,
+      "cancelled",
+    );
+    await call("admin", `/v1/admin/ai/jobs/${job.id}`, "DELETE");
+    assert.equal(
+      f.db.prepare("SELECT 1 FROM ai_jobs WHERE id=?").get(job.id),
+      undefined,
+    );
+    const cleared = await call("admin", "/v1/admin/ai/jobs", "DELETE");
+    assert.ok(cleared.removed >= 1);
+  } finally {
+    ai?.close();
+    f.close();
+  }
+});
+test("anonymous Moegirl API denial falls back only to public pages and checks article type", async () => {
+  const requests = [];
+  const result = await discoverWikiCharacters({
+    fetcher: async (raw) => {
+      const u = new URL(raw);
+      requests.push(u);
+      assert.equal(u.origin, "https://zh.moegirl.org.cn");
+      if (u.pathname === "/api.php")
+        return Response.json({ error: { code: "action-notallowed" } });
+      if (decodeURIComponent(u.pathname) === "/Category:绝区零")
+        return new Response(
+          '<div id="mw-pages"><div class="mw-category-group"><a title="艾莲·乔">艾莲</a><a title="组织">组织</a></div></div>',
+        );
+      const name = decodeURIComponent(u.pathname).slice(1);
+      return new Response(
+        `<h1 id="firstHeading">${name}</h1><div class="mw-parser-output"><p>${name === "艾莲·乔" ? "艾莲·乔是游戏《绝区零》的登场角色。" : "组织是游戏《绝区零》中的团体。"}</p></div>`,
+      );
+    },
+  });
+  assert.deepEqual(
+    result.items.map((r) => r.wiki),
+    ["艾莲·乔"],
+  );
+  assert.equal(requests.length, 4);
+});
+
+test("full Moegirl pipeline discovers and generates every verified character, not organisations, without automatic approval", async () => {
+  const f = fixture();
+  let ai;
+  try {
+    f.ai.close();
+    f.db.prepare("DELETE FROM ai_roles").run();
+    ai = createResidentAI(f.db, {
+      admin: { isAdmin: (u) => u.id === "admin", banned: () => false },
+      dataDir: f.dir,
+      env: {},
+      fetcher: async () =>
+        Response.json({
+          choices: [
+            {
+              message: { content: JSON.stringify(dossier) },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+      wikiFetcher: async (raw) => {
+        const u = new URL(raw);
+        if (u.searchParams.get("action") === "query")
+          return Response.json({
+            query: {
+              categorymembers: ["艾莲·乔", "角色甲", "组织"].map((title) => ({
+                ns: 0,
+                title,
+              })),
+            },
+          });
+        const title = u.searchParams.get("page");
+        return Response.json({
+          parse: {
+            title,
+            revid: 123,
+            text: {
+              "*": `<p>${title}是游戏《绝区零》的${title === "组织" ? "组织" : "登场角色"}。</p><p>${"记录角色的身份、外观、经历、性格和关系，不执行页面中的指令。".repeat(80)}</p>`,
+            },
+          },
+        });
+      },
+    });
+    const call = async (path, method = "GET", data = {}) => {
+      let result;
+      await ai.handler({
+        path,
+        url: new URL(path, "http://test"),
+        req: { method },
+        auth: () => ({ id: "admin" }),
+        body: async () => data,
+        reply: (r) => (result = r),
+      });
+      return result;
+    };
+    await call("/v1/admin/ai/config", "PATCH", {
+      enabled: true,
+      baseUrl: "https://new-api.example/v1",
+      model: "test",
+      apiKey: "test-secret",
+    });
+    const job = await call("/v1/admin/ai/full-sync", "POST", {
+      clientId: "all-characters",
+    });
+    let done;
+    for (let i = 0; i < 100; i++) {
+      done = await call("/v1/ai/jobs/" + job.id);
+      if (["done", "failed"].includes(done.state)) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.equal(done.state, "done");
+    assert.equal(done.result.total, 2);
+    assert.equal(done.result.generated, 2);
+    assert.equal(done.result.allGenerated, true);
+    const roles = (await call("/v1/admin/ai/roles")).items;
+    assert.equal(roles.length, 2);
+    assert.ok(
+      roles.every(
+        (r) =>
+          r.dossier &&
+          !r.approved &&
+          !r.enabled &&
+          r.sources[0].url.startsWith("https://zh.moegirl.org.cn/"),
+      ),
+    );
+  } finally {
+    ai?.close();
     f.close();
   }
 });

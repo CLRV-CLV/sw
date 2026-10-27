@@ -13,6 +13,14 @@ const emit = defineEmits<{
   equipped: [card: BusinessCard | null];
 }>();
 
+const cardFile=ref<HTMLInputElement|null>(null),uploadingCard=ref(false);
+async function uploadCard(event:Event){
+ const file=(event.target as HTMLInputElement).files?.[0];if(!file)return;
+ if(!confirm('上传并使用自定义名片需要20菲林，确认继续？'))return;
+ uploadingCard.value=true;
+ try{const card=await api.uploadCustomCard(file);equippedId.value=card.documentId;equippedCard.value=card;selectedCard.value=card;tabStates.all.cards=[card,...tabStates.all.cards.filter(c=>c.documentId!==card.documentId)];emit('equipped',card);message.success('名片上传成功，已扣除20菲林');}
+ catch(e){message.error(resolveErrorMessage(e,'名片上传失败'));}finally{uploadingCard.value=false;if(cardFile.value)cardFile.value.value='';}
+}
 const api = useApi();
 const message = useMessage();
 
@@ -303,6 +311,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <div class="custom-card-upload"><input ref="cardFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden @change="uploadCard" /><z-button :disabled="uploadingCard" @click="cardFile?.click()">{{uploadingCard?'上传中…':'上传自定义名片 · 20菲林'}}</z-button></div>
             <!-- Main content area -->
             <div class="ik-bc-main">
 
@@ -456,6 +465,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.custom-card-upload{padding:12px 20px;text-align:right}
+
 /* ── Overlay (reuse post overlay pattern) ── */
 .ik-overlay {
   position: fixed;

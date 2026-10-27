@@ -466,6 +466,11 @@ watch(
           </div>
         </div>
 
+        <div v-if="auth.isLogin" class="ik-header-denny ik-header-polychrome" title="这是珍贵的货币" @click="navigateTo(auth.profilePath || '/profile')">
+          <img alt="菲林" src="/images/materials/polychrome.svg" class="ik-header-denny__img" draggable="false" />
+          <div class="ik-header-denny__content"><IkRollingDigit :value="auth.user?.polychrome ?? 0" :min-digits="8" :duration="800" pad-end /></div>
+        </div>
+
         <!-- 品牌 Logo：桌面端仅未登录显示；移动端未登录显示 logo，登录后显示头像 -->
         <NuxtLink to="/" class="ik-brand" aria-label="Inter Knot 首页">
           <img src="/images/zzzicon.png" alt="Inter Knot" class="ik-brand__icon" draggable="false" />

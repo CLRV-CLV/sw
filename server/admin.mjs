@@ -1,6 +1,6 @@
 import { createProfiles, validateProfile, safeImage } from './site-data.mjs';
 import { randomUUID } from 'node:crypto';
-export function createAdmin(db, { env = process.env, broadcast = () => {} } = {}) {
+export function createAdmin(db, { env = process.env, broadcast = () => {}, onPostApproved = () => {} } = {}) {
   db.exec(`CREATE TABLE IF NOT EXISTS user_access(userId TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'user', banned INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS site_settings(key TEXT PRIMARY KEY,value TEXT);
     CREATE TABLE IF NOT EXISTS admin_audit(id TEXT PRIMARY KEY,actor TEXT,action TEXT,target TEXT,createdAt TEXT);`);
@@ -60,7 +60,7 @@ export function createAdmin(db, { env = process.env, broadcast = () => {} } = {}
         const b = await body(req), allowed = type === 'posts' ? ['title','body','status'] : ['body'];
         if (Object.keys(b).some(k => !allowed.includes(k)) || (b.title !== undefined && (typeof b.title !== 'string' || !b.title.trim() || b.title.length>200)) || (b.body !== undefined && (typeof b.body !== 'string' || b.body.length>500000)) || (b.status !== undefined && !['draft','published'].includes(b.status))) throw fail(400,'无效内容字段');
         const data = { ...JSON.parse(row.data), ...b, updatedAt:new Date().toISOString() }; if (b.status === 'published' && !data.publishedAt) data.publishedAt = new Date().toISOString();
-        transaction(() => { db.prepare(`UPDATE ${type} SET data=? WHERE id=?`).run(JSON.stringify(data),id); audit(actor.id,`${type}.update`,id); }); broadcast('content.updated',{id}); reply({ok:true}); return true;
+        transaction(() => { db.prepare(`UPDATE ${type} SET data=? WHERE id=?`).run(JSON.stringify(data),id); if(type==='posts'&&b.status==='published')onPostApproved(data); audit(actor.id,`${type}.update`,id); }); broadcast('content.updated',{id}); reply({ok:true}); return true;
       }
       if (method === 'DELETE') {
         transaction(() => {

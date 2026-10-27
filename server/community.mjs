@@ -270,6 +270,12 @@ export function createCommunity(
     )
       throw fail(400, "超过当前等级的正文或封面配额");
   }
+  const builtInCards=[{id:'card-interknot',name:'绳网',kind:'city',image:{url:'/images/zzz.webp',width:1921,height:1537}}];
+  function userCards(uid){
+    const custom=db.prepare("SELECT 1 FROM sqlite_master WHERE name='custom_cards'").get()?db.prepare('SELECT data FROM custom_cards WHERE userId=?').all(uid).map(r=>JSON.parse(r.data)):[];
+    return [...builtInCards,...custom];
+  }
+  function card(uid){const id=db.prepare('SELECT cardId FROM user_cosmetics WHERE userId=?').get(uid)?.cardId;return userCards(uid).find(c=>c.id===id)||null;}
   async function handler({
     path,
     req,
@@ -318,16 +324,8 @@ export function createCommunity(
       reply({ equippedAvatarId: a?.id || null });
       return true;
     }
-    const cards = [
-      {
-        id: "card-interknot",
-        name: "绳网",
-        kind: "city",
-        image: { url: "/images/zzz.webp", width: 1921, height: 1537 },
-      },
-    ];
     if (path === "/v1/me/cards" && method === "GET") {
-      const u = auth(),
+      const u = auth(), cards=userCards(u.id),
         id = db
           .prepare("SELECT cardId FROM user_cosmetics WHERE userId=?")
           .get(u.id)?.cardId;
@@ -342,6 +340,7 @@ export function createCommunity(
     if (path === "/v1/me/cards/equipped" && method === "PUT") {
       const u = auth(),
         b = await body(req);
+      const cards=userCards(u.id);
       if (b.cardId !== null && !cards.some((c) => c.id === b.cardId))
         throw fail(400, "名片不存在");
       db.prepare("INSERT OR REPLACE INTO user_cosmetics VALUES(?,?)").run(
@@ -1130,6 +1129,7 @@ export function createCommunity(
     enrich,
     following: (u, id) => has("user_follows", u, id),
     blocked: (u, id) => has("feed_blocks", u, id),
+    card,
     pins: (uid) =>
       json(
         db.prepare("SELECT data FROM profile_pins WHERE userId=?").get(uid),

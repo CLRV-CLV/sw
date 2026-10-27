@@ -151,11 +151,13 @@ watch(
       <NuxtLink to="/">← 推送</NuxtLink
       ><NuxtLink to="/level">等级 / 签到</NuxtLink
       ><NuxtLink to="/account">账号安全</NuxtLink
-      ><button :disabled="busy" @click="load">刷新</button>
+      ><IkActionButton :disabled="busy" @click="load">刷新</IkActionButton>
     </nav>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
-    <button v-if="!auth.isLogin" @click="login.open()">登录本站</button>
+    <IkActionButton v-if="!auth.isLogin" @click="login.open()"
+      >登录本站</IkActionButton
+    >
     <div v-else class="activity-grid">
       <article>
         <h2>我的日程</h2>
@@ -172,7 +174,7 @@ watch(
             >截止时间（可选）<input
               v-model="dueAt"
               type="datetime-local" /></label
-          ><button :disabled="busy">添加日程</button>
+          ><IkActionButton :disabled="busy">添加日程</IkActionButton>
         </form>
         <div
           v-for="t in tasks"
@@ -190,13 +192,15 @@ watch(
               @change="toggle(t)"
             /><span :class="{ done: t.done }">{{ t.title }}</span></label
           ><small v-if="t.dueAt">{{ new Date(t.dueAt).toLocaleString() }}</small
-          ><button :disabled="busy" @click="remove(t)">删除</button>
+          ><IkActionButton :disabled="busy" @click="remove(t)"
+            >删除</IkActionButton
+          >
         </div>
         <p v-if="!tasks.length" class="muted">还没有日程。</p>
       </article>
       <article>
         <h2>通知</h2>
-        <button
+        <IkActionButton
           :disabled="busy"
           @click="
             run(() =>
@@ -208,7 +212,7 @@ watch(
           "
         >
           全部标记已读
-        </button>
+        </IkActionButton>
         <div
           v-for="n in notifications"
           :key="n.id"
@@ -217,7 +221,7 @@ watch(
         >
           <NuxtLink :to="n.href">{{ n.text }}</NuxtLink
           ><small>{{ new Date(n.createdAt).toLocaleString() }}</small
-          ><button
+          ><IkActionButton
             v-if="!n.read"
             :disabled="busy"
             @click="
@@ -230,7 +234,7 @@ watch(
             "
           >
             已读
-          </button>
+          </IkActionButton>
         </div>
         <p v-if="!notifications.length" class="muted">暂时没有新通知。</p>
       </article>
@@ -254,7 +258,7 @@ watch(
               max="1000000"
               step="1"
               required /></label
-          ><button :disabled="busy || !peer">确认转账</button>
+          ><IkActionButton :disabled="busy || !peer">确认转账</IkActionButton>
         </form>
         <p class="muted">丁尼是站内虚拟资产，不是现实货币。转账会立即到账。</p>
         <div v-for="l in logs" :key="l.id" class="log">
@@ -286,7 +290,7 @@ nav {
 a {
   color: #d7fa00;
 }
-button {
+button:not(.z-button) {
   border: 1px solid #5c644d;
   background: #202220;
   color: #e5e7df;

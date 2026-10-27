@@ -1,3 +1,4 @@
+import { createPremium } from './premium.mjs';
 import { createEmailAuth } from './email-auth.mjs';
 import { createActivity } from './activity.mjs';
 import { createCommunity, validateVideos } from './community.mjs';
@@ -59,7 +60,8 @@ db.exec("COMMIT");
 db.prepare("INSERT OR IGNORE INTO app_meta VALUES('demo_initialized','1')").run();
 const insert = db.prepare("INSERT OR IGNORE INTO posts VALUES (?,?)");
 const profiles = createProfiles(db);
-const uploads = createUploads(db,profiles);
+const premium=createPremium(db,profiles);
+const uploads = createUploads(db,profiles,{premium});
 const activity=createActivity(db);
 const publicUser = (u) => ({
   id: u.id,
@@ -88,7 +90,7 @@ const broadcast = (t, d) => {
     if (ws.readyState === 1) ws.send(JSON.stringify({ op: "event", t, d }));
 };
 const connections = createConnections();
-const admin = createAdmin(db, { broadcast });
+const admin = createAdmin(db, { broadcast, onPostApproved:premium.approvePost });
 function issueSession(u,req,res){
  const t=randomBytes(32).toString('hex');
  db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(t,u.id,Date.now()+604800000);
@@ -280,7 +282,7 @@ const app = http.createServer(async (req, res) => {
       if(p.hidden&&!self&&!admin.isAdmin(user))return reply({id,username:me.name,isHidden:true,isSelf:false});
       const posts=db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft');
       const {denny,polychrome,...publicProfile}=p;
-      return reply({...me,username:me.name,login:target.username,avatar:{url:me.avatarUrl},...publicProfile,...(self||admin.isAdmin(user)?{denny,polychrome}:{}),isSelf:self,isHidden:p.hidden,pinnedPostIds:community.pins(id),isFollowing:!!user&&community.following(user.id,id),isBlockedByMe:!!user&&community.blocked(user.id,id),hasBlockedMe:!!user&&community.blocked(id,user.id),followerCount:db.prepare("SELECT count(*) n FROM user_follows WHERE peerId=?").get(id).n,followingCount:db.prepare("SELECT count(*) n FROM user_follows WHERE userId=?").get(id).n,stats:{postCount:posts.length,commentCount:db.prepare("SELECT count(*) n FROM comments WHERE json_extract(data,'$.authorId')=?").get(id).n,totalViews:posts.reduce((sum,p)=>sum+(p.viewCount||0),0)}});
+      return reply({...me,username:me.name,login:target.username,avatar:{url:me.avatarUrl},...publicProfile,...(self||admin.isAdmin(user)?{denny,polychrome}:{}),isSelf:self,isHidden:p.hidden,pinnedPostIds:community.pins(id),equippedCard:community.card(id),isFollowing:!!user&&community.following(user.id,id),isBlockedByMe:!!user&&community.blocked(user.id,id),hasBlockedMe:!!user&&community.blocked(id,user.id),followerCount:db.prepare("SELECT count(*) n FROM user_follows WHERE peerId=?").get(id).n,followingCount:db.prepare("SELECT count(*) n FROM user_follows WHERE userId=?").get(id).n,stats:{postCount:posts.length,commentCount:db.prepare("SELECT count(*) n FROM comments WHERE json_extract(data,'$.authorId')=?").get(id).n,totalViews:posts.reduce((sum,p)=>sum+(p.viewCount||0),0)}});
     }
     const reactionCount = (id, kind) =>
       Number(

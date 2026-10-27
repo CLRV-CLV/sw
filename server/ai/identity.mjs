@@ -24,10 +24,11 @@ export function wikiIdentity(value) {
   try {
     if (/^https?:/.test(s)) {
       const u = new URL(s);
-      s = decodeURIComponent(u.pathname.split("/wiki/")[1] || "");
+      s = decodeURIComponent(u.pathname.replace(/^\/(?:wiki\/)?/, ""));
     }
   } catch {}
   s = s
+    .replace(/^绝区零[:：]/, "")
     .replace(/^(?:en|zh|zh-cn|zh-tw|ja|ko|ru|fr|de):/i, "")
     .replace(
       /\s*\((?:english|chinese|japanese|korean|简体中文|繁體中文|中文|日文|英文)\)$/i,

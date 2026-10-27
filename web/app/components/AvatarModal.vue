@@ -124,6 +124,7 @@ const cancelCrop = () => {
 
 const confirmCrop = async () => {
   if (!cropperRef.value || uploading.value) return;
+  if(!confirm('上传并使用自定义头像需要20菲林，确认继续？'))return;
   uploading.value = true;
   try {
     const { canvas } = cropperRef.value.getResult();
@@ -379,7 +380,7 @@ onBeforeUnmount(() => {
                 <!-- Submit -->
                 <div class="ik-av-submit-wrap">
                   <z-button class="ik-av-submit" :disabled="uploading" @click="confirmCrop">
-                    {{ uploading ? '上传中...' : '确认上传' }}
+                    {{ uploading ? '上传中...' : '确认上传 · 20菲林' }}
                   </z-button>
                 </div>
 

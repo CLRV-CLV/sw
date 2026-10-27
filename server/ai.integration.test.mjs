@@ -46,6 +46,7 @@ test("resident AI HTTP end-to-end: New API transport, first admin, private chat,
     child = spawn(process.execPath, ["server/index.mjs"], {
       env: {
         ...process.env,
+        AI_SEED_CATALOG: "1",
         DATA_DIR: dir,
         PORT: "39129",
         AI_ENABLED: "0",
@@ -155,7 +156,7 @@ test("resident AI HTTP end-to-end: New API transport, first admin, private chat,
             text: "Explicit integration fixture, not a live Wiki result. ".repeat(
               40,
             ),
-            part: "Lore",
+            part: "",
           },
           a.token,
         )

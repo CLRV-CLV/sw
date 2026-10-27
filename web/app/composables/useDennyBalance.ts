@@ -17,7 +17,7 @@ export function useDennyBalance() {
     const promise = api.getMyDenny().then((data) => {
       // 登录切换、签到或投币期间的旧余额不能覆盖新余额。
       if (auth.generation === generation && revision === currentRevision) {
-        auth.updateUserPartial({ denny: data.denny });
+        auth.updateUserPartial({ denny: data.denny, polychrome:data.polychrome });
       }
     }).catch(() => {
       // 网络失败保留已显示的余额，下次显式刷新重试。

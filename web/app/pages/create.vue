@@ -56,7 +56,8 @@ const confirmDialog = useConfirmDialog();
 const message = useMessage();
 const pendingPost = usePendingPost();
 // 等级权益：发帖图片数与正文字数上限随等级变化
-const { articleMaxImages: maxCoverImages, articleMaxBody: maxBodyChars } = useBenefits();
+const { articleMaxImages: maxCoverImages, articleMaxBody: maxBodyChars } =
+  useBenefits();
 
 useSeoMeta({
   title: "发布委托 - 绳网",
@@ -89,8 +90,10 @@ const isVideoDialogVisible = ref(false);
 // 鼠标悬停/聚焦在「添加图片」或「添加视频」上时，高亮对应类型并禁用另一个入口
 const hoveredMediaType = ref<"image" | "video" | null>(null);
 const activeMediaType = computed(() => {
-  if (isVideoDialogVisible.value || hoveredMediaType.value === "video") return "video";
-  if (showImagePickerModal.value || hoveredMediaType.value === "image") return "image";
+  if (isVideoDialogVisible.value || hoveredMediaType.value === "video")
+    return "video";
+  if (showImagePickerModal.value || hoveredMediaType.value === "image")
+    return "image";
   return null;
 });
 
@@ -128,11 +131,25 @@ const selectedCategoryName = computed(() => {
 
 /* ── 标签（话题横切维度，与频道正交；完全自由创建，上限 5 个）── */
 const MAX_TAGS = MAX_TAGS_PER_ARTICLE;
-const isTagEditingDisabled = computed(() => isLoadingEditor.value || isPublishing.value || isDeletingDraft.value || isDiscardingChanges.value);
+const isTagEditingDisabled = computed(
+  () =>
+    isLoadingEditor.value ||
+    isPublishing.value ||
+    isDeletingDraft.value ||
+    isDiscardingChanges.value,
+);
 const {
-  selectedTags, tagInput, tagSuggestions, isComposing: isTagComposing,
-  addTag, removeTag, resetTags, onTagInput, onTagEnter,
-  onTagCompositionStart, onTagCompositionEnd,
+  selectedTags,
+  tagInput,
+  tagSuggestions,
+  isComposing: isTagComposing,
+  addTag,
+  removeTag,
+  resetTags,
+  onTagInput,
+  onTagEnter,
+  onTagCompositionStart,
+  onTagCompositionEnd,
 } = useTagEditor({
   suggest: (query, signal) => api.suggestTags(query, signal),
   onChange: () => markDirty(),
@@ -184,7 +201,9 @@ const remainingCoverSlots = computed(() =>
 );
 
 const bodyCharCount = computed(() => body.value.length);
-const isBodyOverLimit = computed(() => bodyCharCount.value > maxBodyChars.value);
+const isBodyOverLimit = computed(
+  () => bodyCharCount.value > maxBodyChars.value,
+);
 
 const existingUploadIds = computed(() =>
   uploadTasks.value
@@ -223,7 +242,8 @@ const coverPayload = computed(() => {
 const MAX_EXTERNAL_VIDEOS = 1;
 const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
 const AVID_RE = /^(?:av)?(\d+)$/i;
-const BILIBILI_URL_RE = /(?:bilibili\.com\/video\/(BV[0-9A-Za-z]{10})|bilibili\.com\/video\/(?:av)?(\d+))/i;
+const BILIBILI_URL_RE =
+  /(?:bilibili\.com\/video\/(BV[0-9A-Za-z]{10})|bilibili\.com\/video\/(?:av)?(\d+))/i;
 
 function buildBilibiliEmbedUrl(
   bvid: string | null | undefined,
@@ -300,7 +320,10 @@ async function onVideoDialogConfirm(raw: string) {
     return;
   }
 
-  const info = await api.getBilibiliInfo(video.bvid || undefined, video.aid || undefined);
+  const info = await api.getBilibiliInfo(
+    video.bvid || undefined,
+    video.aid || undefined,
+  );
   if (!info) {
     message.error("获取视频信息失败，请检查链接是否有效");
     return;
@@ -310,12 +333,20 @@ async function onVideoDialogConfirm(raw: string) {
   const pageInfo = info.pages?.find((page) => page.page === targetP);
   const cid = pageInfo?.cid ?? info.cid;
 
-  video.cid = typeof cid === 'number' ? cid : null;
-  video.embedUrl = buildBilibiliEmbedUrl(video.bvid, video.aid, video.cid, video.p);
+  video.cid = typeof cid === "number" ? cid : null;
+  video.embedUrl = buildBilibiliEmbedUrl(
+    video.bvid,
+    video.aid,
+    video.cid,
+    video.p,
+  );
   video.coverUrl = info.pic || "/images/default-cover.webp";
-  if(!info.pic)message.warning("未取得原站封面，仅保存官方播放器链接；播放仍取决于原站权限。");
+  if (!info.pic)
+    message.warning(
+      "未取得原站封面，仅保存官方播放器链接；播放仍取决于原站权限。",
+    );
   if (info.title) video.title = info.title;
-  if (typeof info.duration === 'number') video.duration = info.duration;
+  if (typeof info.duration === "number") video.duration = info.duration;
 
   externalVideos.value.push(video);
   isVideoDialogVisible.value = false;
@@ -367,8 +398,6 @@ function syncSnapshot() {
   hasUnsavedChanges.value = false;
 }
 
-
-
 /* ── Auto-save ────────────────────────────────────── */
 const performSaveDraft = async (force = false) => {
   const epoch = draftEpoch.value;
@@ -392,7 +421,12 @@ const performSaveDraft = async (force = false) => {
 
 const saveDraft = async (force = false): Promise<void> => {
   if (!auth.isLogin || (editorDisposed && !force)) return;
-  if (isDeletingDraft.value || isDiscardingChanges.value || (isPublishing.value && !force)) return;
+  if (
+    isDeletingDraft.value ||
+    isDiscardingChanges.value ||
+    (isPublishing.value && !force)
+  )
+    return;
   if (!documentId.value && !hasAnyContent.value) return;
 
   const content = editorContent();
@@ -453,7 +487,12 @@ const saveDraft = async (force = false): Promise<void> => {
     // 两个前置条件都不能省：!isCreate（新建请求返 404 是路由/网关问题，清掉别人刚填进来
     // 的 id 只会雪上加霜）、纪元未变（否则清的是用户已经切过去的那篇）。targetId 与
     // !isCreate 同义，写出来是为了让 TS 收窄。
-    if (isNotFoundError(err) && !isCreate && draftEpoch.value === epoch && targetId) {
+    if (
+      isNotFoundError(err) &&
+      !isCreate &&
+      draftEpoch.value === epoch &&
+      targetId
+    ) {
       const wasEditingPublished = isEditingPublished.value;
       documentId.value = null;
       isEditingPublished.value = false;
@@ -466,7 +505,9 @@ const saveDraft = async (force = false): Promise<void> => {
         // 为新草稿（这次 debouncedSave 会落盘），但发布必须失败并说清楚。
         debouncedSave();
         if (force) {
-          throw new Error("原委托已不存在，内容已转存为新草稿，请确认后重新发布");
+          throw new Error(
+            "原委托已不存在，内容已转存为新草稿，请确认后重新发布",
+          );
         }
         message.warning("原委托已不存在，内容已转存为新草稿");
         return;
@@ -556,7 +597,9 @@ function openImagePicker() {
     return;
   }
   if (remainingCoverSlots.value <= 0) {
-    message.error(`当前等级最多上传 ${maxCoverImages.value} 张图片，升级可提升上限`);
+    message.error(
+      `当前等级最多上传 ${maxCoverImages.value} 张图片，升级可提升上限`,
+    );
     return;
   }
   showImagePickerModal.value = true;
@@ -578,7 +621,10 @@ function handleImagePickerSelect(uploads: UploadedFile[]) {
   const existing = new Set(existingUploadIds.value);
   const remaining = remainingCoverSlots.value;
   const available = uploads
-    .filter((upload) => upload.documentId && upload.url && !existing.has(upload.documentId))
+    .filter(
+      (upload) =>
+        upload.documentId && upload.url && !existing.has(upload.documentId),
+    )
     .slice(0, remaining);
 
   if (!available.length) {
@@ -594,7 +640,9 @@ function handleImagePickerSelect(uploads: UploadedFile[]) {
 
 function handleImagePickerDelete(upload: UploadedFile) {
   if (!upload.documentId) return;
-  const index = uploadTasks.value.findIndex((task) => task.serverId === upload.documentId);
+  const index = uploadTasks.value.findIndex(
+    (task) => task.serverId === upload.documentId,
+  );
   if (index !== -1) removeUpload(index);
 }
 
@@ -627,7 +675,9 @@ function handleFileSelect(files: FileList | File[]) {
   const remaining = maxCoverImages.value - uploadTasks.value.length;
 
   if (remaining <= 0) {
-    message.error(`当前等级最多上传 ${maxCoverImages.value} 张图片，升级可提升上限`);
+    message.error(
+      `当前等级最多上传 ${maxCoverImages.value} 张图片，升级可提升上限`,
+    );
     return;
   }
 
@@ -728,7 +778,12 @@ async function publish() {
 
     router.replace("/");
   } catch (err) {
-    message.error(resolveErrorMessage(err, isEditingPublished.value ? "更新失败" : "发布失败"));
+    message.error(
+      resolveErrorMessage(
+        err,
+        isEditingPublished.value ? "更新失败" : "发布失败",
+      ),
+    );
   } finally {
     isPublishing.value = false;
     if (hasUnsavedChanges.value) debouncedSave();
@@ -737,7 +792,13 @@ async function publish() {
 
 /* ── Discard changes (editing published post) ───── */
 async function discardChanges() {
-  if (!documentId.value || !isEditingPublished.value || isPublishing.value || isDiscardingChanges.value) return;
+  if (
+    !documentId.value ||
+    !isEditingPublished.value ||
+    isPublishing.value ||
+    isDiscardingChanges.value
+  )
+    return;
   const targetId = documentId.value;
   const epoch = draftEpoch.value;
   const ok = await confirmDialog.open({
@@ -770,7 +831,12 @@ async function deleteDraft() {
   if (!documentId.value || isPublishing.value || isDeletingDraft.value) return;
   const targetId = documentId.value;
   const epoch = draftEpoch.value;
-  const ok = await confirmDialog.open({ title: "删除草稿", message: "确定删除该草稿？删除后不可恢复。", confirmText: "删除", danger: true });
+  const ok = await confirmDialog.open({
+    title: "删除草稿",
+    message: "确定删除该草稿？删除后不可恢复。",
+    confirmText: "删除",
+    danger: true,
+  });
   if (!ok || epoch !== draftEpoch.value) return;
 
   isDeletingDraft.value = true;
@@ -804,8 +870,8 @@ const editorWordCount = computed(() => body.value.length);
 const editorTitleCount = computed(() => title.value.length);
 
 const EDITING_KEY = "__editing__";
-const activeMenuKey = computed<string>(
-  () => (isEditingPublished.value ? EDITING_KEY : documentId.value || EDITING_KEY),
+const activeMenuKey = computed<string>(() =>
+  isEditingPublished.value ? EDITING_KEY : documentId.value || EDITING_KEY,
 );
 
 /* ── Mobile sheet handlers ────────────────────────── */
@@ -885,13 +951,21 @@ async function ensureDraftsLoaded() {
 }
 
 async function openDraft(draft: DraftArticle) {
-  if (draft.documentId === documentId.value || isPublishing.value || isDeletingDraft.value || isDiscardingChanges.value) {
+  if (
+    draft.documentId === documentId.value ||
+    isPublishing.value ||
+    isDeletingDraft.value ||
+    isDiscardingChanges.value
+  ) {
     return;
   }
   const revision = ++editorLoadRevision;
   isLoadingEditor.value = true;
 
-  if (pendingSave || (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))) {
+  if (
+    pendingSave ||
+    (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))
+  ) {
     try {
       await performSaveDraft(true);
     } catch (err) {
@@ -992,10 +1066,14 @@ function resetEditor() {
 }
 
 async function newDraft() {
-  if (isPublishing.value || isDeletingDraft.value || isDiscardingChanges.value) return;
+  if (isPublishing.value || isDeletingDraft.value || isDiscardingChanges.value)
+    return;
   const revision = ++editorLoadRevision;
   isLoadingEditor.value = true;
-  if (pendingSave || (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))) {
+  if (
+    pendingSave ||
+    (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))
+  ) {
     try {
       await performSaveDraft(true);
     } catch (err) {
@@ -1054,7 +1132,8 @@ function onDrop(e: DragEvent) {
 }
 
 /* ── Cover preview (lightGallery, done tasks only) ── */
-const { openGallery: openLightGallery, preload: preloadGallery } = useLightGallery();
+const { openGallery: openLightGallery, preload: preloadGallery } =
+  useLightGallery();
 
 function openCoverPreview(index: number) {
   const task = uploadTasks.value[index];
@@ -1127,9 +1206,13 @@ onBeforeRouteLeave(async () => {
   if (isDeletingDraft.value || isDiscardingChanges.value) return false;
   try {
     // 保存期间页面仍可输入；每次都重新检查，直到最新内容也已经落盘。
-    while (pendingSave || (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))) {
+    while (
+      pendingSave ||
+      (hasUnsavedChanges.value && (documentId.value || hasAnyContent.value))
+    ) {
       if (isDeletingDraft.value || isDiscardingChanges.value) return false;
-      if (!auth.isLogin) throw new Error("登录状态已失效，请重新登录后保存草稿");
+      if (!auth.isLogin)
+        throw new Error("登录状态已失效，请重新登录后保存草稿");
       await performSaveDraft(true);
     }
     return true;
@@ -1140,7 +1223,8 @@ onBeforeRouteLeave(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (import.meta.client) window.removeEventListener("beforeunload", onBeforeUnload);
+  if (import.meta.client)
+    window.removeEventListener("beforeunload", onBeforeUnload);
   editorDisposed = true;
   editorLoadRevision++;
   cancelDraftSave();
@@ -1169,7 +1253,10 @@ async function loadCategories() {
       // 默认选中无效（如默认分类被下架，或非管理员落在仅管理员分区）时
       // 回落到可见列表首项，保证发布委托必选且不会停留在不可发布委托的分区。
       const selectable = visibleCategories.value;
-      if (selectable.length && !selectable.some((c) => c.slug === selectedCategory.value)) {
+      if (
+        selectable.length &&
+        !selectable.some((c) => c.slug === selectedCategory.value)
+      ) {
         selectedCategory.value = selectable[0]!.slug;
       }
     }
@@ -1209,14 +1296,22 @@ if (import.meta.client) {
 </script>
 
 <template>
-  <section class="ik-create-page" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+  <section
+    class="ik-create-page"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
     <!-- 未通过入站考试：禁止发布委托，引导去考试页 -->
     <div v-if="auth.needExam" class="ik-create-exam-gate">
       <div class="ik-create-exam-gate__panel">
         <div class="ik-create-exam-gate__card">
           <h2>需要先通过入站考试</h2>
           <p>通过入站考试后即可解锁发布委托、评论等功能。</p>
-          <NuxtLink to="/exam" class="ik-create-exam-gate__btn">前往考试</NuxtLink>
+          <NuxtLink to="/exam" class="ik-create-exam-gate__btn"
+            >前往考试</NuxtLink
+          >
         </div>
       </div>
     </div>
@@ -1225,22 +1320,57 @@ if (import.meta.client) {
     <Transition name="ik-fade">
       <div v-if="isDragging" class="ik-create-drop-overlay">
         <div class="ik-create-drop-overlay__inner">
-          <ArrowUpTrayIcon style="width:48px;height:48px;color:#BFFF09" />
+          <ArrowUpTrayIcon style="width: 48px; height: 48px; color: #bfff09" />
           <span class="ik-create-drop-overlay__text">释放以上传图片</span>
         </div>
       </div>
     </Transition>
 
-    <TerminalMasthead title="委托" subtitle="COMPOSE" index="02" description="写下你的情报，交给绳网。" />
-    <div class="compose-toolbar"><NuxtLink to="/">← 返回推送</NuxtLink><span role="status">{{ isSavingDraft ? '正在保存草稿…' : hasUnsavedChanges ? '有尚未保存的修改' : documentId ? '草稿已保存' : '开始一条新委托' }}</span></div>
+    <TerminalMasthead
+      title="委托"
+      subtitle="COMPOSE"
+      index="02"
+      description="写下你的情报，交给绳网。"
+    />
+    <div class="compose-toolbar">
+      <NuxtLink to="/">← 返回推送</NuxtLink
+      ><span role="status">{{
+        isSavingDraft
+          ? "正在保存草稿…"
+          : hasUnsavedChanges
+            ? "有尚未保存的修改"
+            : documentId
+              ? "草稿已保存"
+              : "开始一条新委托"
+      }}</span>
+    </div>
     <!-- ── Two-Column Body ─────────────────────── -->
     <div class="ik-create-columns">
       <!-- ── Left: Editing Slot + Drafts (ZMenu) ── -->
       <aside class="ik-create-nav-wrap">
-        <div class="compose-section-heading"><b>草稿箱</b><small>{{drafts.length}} 条草稿</small></div>
+        <div class="compose-section-heading">
+          <b>草稿箱</b><small>{{ drafts.length }} 条草稿</small>
+        </div>
         <nav class="ik-create-menu" aria-label="草稿箱">
-          <button type="button" class="compose-draft" :class="{'is-active':activeMenuKey===EDITING_KEY}" @click="onMenuChange(EDITING_KEY)"><span>＋ 新建委托</span><small>从一个新想法开始</small></button>
-          <button v-for="draft in drafts" :key="draft.documentId" type="button" class="compose-draft" :class="{'is-active':activeMenuKey===draft.documentId}" @click="onMenuChange(draft.documentId)"><span>{{draft.title||'未命名委托'}}</span><small>{{draftPreviewText(draft)||'还没有正文'}}</small></button>
+          <button
+            type="button"
+            class="compose-draft"
+            :class="{ 'is-active': activeMenuKey === EDITING_KEY }"
+            @click="onMenuChange(EDITING_KEY)"
+          >
+            <span>＋ 新建委托</span><small>从一个新想法开始</small>
+          </button>
+          <button
+            v-for="draft in drafts"
+            :key="draft.documentId"
+            type="button"
+            class="compose-draft"
+            :class="{ 'is-active': activeMenuKey === draft.documentId }"
+            @click="onMenuChange(draft.documentId)"
+          >
+            <span>{{ draft.title || "未命名委托" }}</span
+            ><small>{{ draftPreviewText(draft) || "还没有正文" }}</small>
+          </button>
         </nav>
         <!-- Loading / Empty / Load more -->
         <div v-if="!auth.isLogin" class="ik-nav-empty">请先登录</div>
@@ -1260,7 +1390,11 @@ if (import.meta.client) {
       </aside>
 
       <!-- ── Right: Form Panel ───────────────── -->
-      <main class="ik-create-panel"><div class="compose-section-heading"><b>{{isEditingPublished?'编辑委托':'发布委托'}}</b><small>文字 / 图片 / 视频</small></div>
+      <main class="ik-create-panel">
+        <div class="compose-section-heading">
+          <b>{{ isEditingPublished ? "编辑委托" : "发布委托" }}</b
+          ><small>文字 / 图片 / 视频</small>
+        </div>
         <div class="ik-create-panel__body">
           <!-- ═══ 写作区：标题 + 正文（主内容，无装饰头部） ═══ -->
           <!-- Title field — flat TextField with bottom divider (Flutter desktop style) -->
@@ -1272,7 +1406,9 @@ if (import.meta.client) {
               rows="1"
               maxlength="200"
             />
-            <span class="ik-create-section__count">{{ editorTitleCount }}/200</span>
+            <span class="ik-create-section__count"
+              >{{ editorTitleCount }}/200</span
+            >
           </div>
 
           <!-- Body section（主内容，紧随标题） -->
@@ -1282,7 +1418,8 @@ if (import.meta.client) {
               <span
                 class="ik-create-field__count"
                 :class="{ 'ik-create-field__count--over': isBodyOverLimit }"
-              >{{ bodyCharCount }}/{{ maxBodyChars }}</span>
+                >{{ bodyCharCount }}/{{ maxBodyChars }}</span
+              >
             </div>
             <div class="ik-create-editor-frame">
               <PostBodyEditor v-model="body" />
@@ -1301,103 +1438,139 @@ if (import.meta.client) {
                 <span class="ik-create-field__label">封面</span>
               </div>
               <div class="ik-cover-grid">
-              <div
-                v-for="(task, idx) in uploadTasks"
-                :key="task.localId"
-                class="ik-cover-thumb"
-                :class="{
-                  'ik-cover-thumb--dragging': draggingIndex === idx,
-                  'ik-cover-thumb--drag-over': dragOverIndex === idx && draggingIndex !== null && draggingIndex !== idx,
-                  'ik-cover-thumb--reorderable': task.status === 'done',
-                }"
-                :draggable="task.status === 'done'"
-                @dragstart="onThumbDragStart($event, idx)"
-                @dragover="onThumbDragOver($event, idx)"
-                @drop="onThumbDrop($event, idx)"
-                @dragend="onThumbDragEnd"
-                @mouseenter="task.status === 'done' && preloadGallery()"
-                @click="openCoverPreview(idx)"
-              >
-                <img
-                  :src="toThumbUrl(task.previewUrl)"
-                  :alt="task.filename"
-                  class="ik-cover-thumb__img"
-                  decoding="async"
-                  draggable="false"
-                  @error="($event.target as HTMLImageElement).src = task.previewUrl"
-                />
-                <div v-if="task.status === 'uploading'" class="ik-cover-thumb__overlay">
-                  <span class="ik-cover-thumb__pct">{{ task.progress }}%</span>
-                  <div class="ik-cover-thumb__bar">
-                    <div class="ik-cover-thumb__progress" :style="{ width: task.progress + '%' }"></div>
+                <div
+                  v-for="(task, idx) in uploadTasks"
+                  :key="task.localId"
+                  class="ik-cover-thumb"
+                  :class="{
+                    'ik-cover-thumb--dragging': draggingIndex === idx,
+                    'ik-cover-thumb--drag-over':
+                      dragOverIndex === idx &&
+                      draggingIndex !== null &&
+                      draggingIndex !== idx,
+                    'ik-cover-thumb--reorderable': task.status === 'done',
+                  }"
+                  :draggable="task.status === 'done'"
+                  @dragstart="onThumbDragStart($event, idx)"
+                  @dragover="onThumbDragOver($event, idx)"
+                  @drop="onThumbDrop($event, idx)"
+                  @dragend="onThumbDragEnd"
+                  @mouseenter="task.status === 'done' && preloadGallery()"
+                  @click="openCoverPreview(idx)"
+                >
+                  <img
+                    :src="toThumbUrl(task.previewUrl)"
+                    :alt="task.filename"
+                    class="ik-cover-thumb__img"
+                    decoding="async"
+                    draggable="false"
+                    @error="
+                      ($event.target as HTMLImageElement).src = task.previewUrl
+                    "
+                  />
+                  <div
+                    v-if="task.status === 'uploading'"
+                    class="ik-cover-thumb__overlay"
+                  >
+                    <span class="ik-cover-thumb__pct"
+                      >{{ task.progress }}%</span
+                    >
+                    <div class="ik-cover-thumb__bar">
+                      <div
+                        class="ik-cover-thumb__progress"
+                        :style="{ width: task.progress + '%' }"
+                      ></div>
+                    </div>
                   </div>
+                  <div
+                    v-else-if="task.status === 'pending'"
+                    class="ik-cover-thumb__overlay"
+                  >
+                    <span
+                      class="ik-cover-thumb__spinner"
+                      aria-hidden="true"
+                    ></span>
+                  </div>
+                  <div
+                    v-else-if="task.status === 'error'"
+                    class="ik-cover-thumb__overlay ik-cover-thumb__overlay--error"
+                    @click.stop="retryUpload(task)"
+                  >
+                    <span class="ik-cover-thumb__error-label">上传失败</span>
+                    <span class="ik-cover-thumb__retry">重试</span>
+                  </div>
+                  <span v-if="idx === 0" class="ik-cover-thumb__primary"
+                    >封面</span
+                  >
+                  <button
+                    class="ik-cover-thumb__remove"
+                    @click.stop.prevent="removeUpload(idx)"
+                    aria-label="移除"
+                  >
+                    <XMarkIcon style="width: 14px; height: 14px" />
+                  </button>
                 </div>
                 <div
-                  v-else-if="task.status === 'pending'"
-                  class="ik-cover-thumb__overlay"
+                  v-for="(video, idx) in externalVideos"
+                  :key="`video-${idx}`"
+                  class="ik-cover-thumb ik-cover-thumb--video"
                 >
-                  <span class="ik-cover-thumb__spinner" aria-hidden="true"></span>
+                  <img
+                    v-if="video.coverUrl && !video.coverLoadError"
+                    :src="video.coverUrl"
+                    :alt="video.title || 'B 站视频'"
+                    class="ik-cover-thumb__img"
+                    decoding="async"
+                    draggable="false"
+                    referrerpolicy="no-referrer"
+                    @error="handleVideoCoverError($event, video)"
+                  />
+                  <div
+                    v-if="!video.coverUrl || video.coverLoadError"
+                    class="ik-cover-thumb__fallback"
+                  >
+                    <FilmIcon class="ik-cover-thumb__fallback-icon" />
+                    <span class="ik-cover-thumb__fallback-text">{{
+                      video.bvid || `av${video.aid}`
+                    }}</span>
+                  </div>
+                  <div class="ik-cover-thumb__play">
+                    <PlayIcon class="ik-cover-thumb__play-icon" />
+                  </div>
+                  <button
+                    class="ik-cover-thumb__remove"
+                    @click.stop.prevent="removeExternalVideo(idx)"
+                    aria-label="移除"
+                  >
+                    <XMarkIcon style="width: 14px; height: 14px" />
+                  </button>
                 </div>
-                <div
-                  v-else-if="task.status === 'error'"
-                  class="ik-cover-thumb__overlay ik-cover-thumb__overlay--error"
-                  @click.stop="retryUpload(task)"
-                >
-                  <span class="ik-cover-thumb__error-label">上传失败</span>
-                  <span class="ik-cover-thumb__retry">重试</span>
-                </div>
-                <span v-if="idx === 0" class="ik-cover-thumb__primary">封面</span>
-                <button class="ik-cover-thumb__remove" @click.stop.prevent="removeUpload(idx)" aria-label="移除">
-                  <XMarkIcon style="width:14px;height:14px" />
-                </button>
-              </div>
-              <div
-                v-for="(video, idx) in externalVideos"
-                :key="`video-${idx}`"
-                class="ik-cover-thumb ik-cover-thumb--video"
-              >
-                <img
-                  v-if="video.coverUrl && !video.coverLoadError"
-                  :src="video.coverUrl"
-                  :alt="video.title || 'B 站视频'"
-                  class="ik-cover-thumb__img"
-                  decoding="async"
-                  draggable="false"
-                  referrerpolicy="no-referrer"
-                  @error="handleVideoCoverError($event, video)"
+                <CoverImageAddButton
+                  v-if="uploadTasks.length < maxCoverImages"
+                  :is-dragging="isDragging"
+                  :disabled="
+                    activeMediaType === 'video' || externalVideos.length > 0
+                  "
+                  @mouseenter="onMediaEnter('image')"
+                  @mouseleave="onMediaLeave('image')"
+                  @focus="onMediaEnter('image')"
+                  @blur="onMediaLeave('image')"
+                  @click="openImagePicker"
                 />
-                <div v-if="!video.coverUrl || video.coverLoadError" class="ik-cover-thumb__fallback">
-                  <FilmIcon class="ik-cover-thumb__fallback-icon" />
-                  <span class="ik-cover-thumb__fallback-text">{{ video.bvid || `av${video.aid}` }}</span>
-                </div>
-                <div class="ik-cover-thumb__play">
-                  <PlayIcon class="ik-cover-thumb__play-icon" />
-                </div>
-                <button class="ik-cover-thumb__remove" @click.stop.prevent="removeExternalVideo(idx)" aria-label="移除">
-                  <XMarkIcon style="width:14px;height:14px" />
-                </button>
+                <CoverVideoAddButton
+                  v-if="
+                    externalVideos.length < MAX_EXTERNAL_VIDEOS &&
+                    uploadTasks.length === 0
+                  "
+                  :is-dragging="false"
+                  :disabled="activeMediaType === 'image'"
+                  @mouseenter="onMediaEnter('video')"
+                  @mouseleave="onMediaLeave('video')"
+                  @focus="onMediaEnter('video')"
+                  @blur="onMediaLeave('video')"
+                  @click="openVideoDialog"
+                />
               </div>
-              <CoverImageAddButton
-                v-if="uploadTasks.length < maxCoverImages"
-                :is-dragging="isDragging"
-                :disabled="activeMediaType === 'video' || externalVideos.length > 0"
-                @mouseenter="onMediaEnter('image')"
-                @mouseleave="onMediaLeave('image')"
-                @focus="onMediaEnter('image')"
-                @blur="onMediaLeave('image')"
-                @click="openImagePicker"
-              />
-              <CoverVideoAddButton
-                v-if="externalVideos.length < MAX_EXTERNAL_VIDEOS && uploadTasks.length === 0"
-                :is-dragging="false"
-                :disabled="activeMediaType === 'image'"
-                @mouseenter="onMediaEnter('video')"
-                @mouseleave="onMediaLeave('video')"
-                @focus="onMediaEnter('video')"
-                @blur="onMediaLeave('video')"
-                @click="openVideoDialog"
-              />
-            </div>
               <BilibiliVideoDialog
                 v-model:visible="isVideoDialogVisible"
                 @confirm="onVideoDialogConfirm"
@@ -1407,7 +1580,10 @@ if (import.meta.client) {
 
             <!-- Category section（发布委托必选频道）
                  加载中即渲染占位标签，为分类栏预留高度，避免列表后到挤压导致跳动 -->
-            <div v-if="categoriesLoading || visibleCategories.length" class="ik-create-section">
+            <div
+              v-if="categoriesLoading || visibleCategories.length"
+              class="ik-create-section"
+            >
               <div class="ik-create-field">
                 <span class="ik-create-field__label">分类</span>
               </div>
@@ -1418,7 +1594,10 @@ if (import.meta.client) {
                     :key="cat.slug"
                     type="button"
                     class="ik-create-category-chip"
-                    :class="{ 'ik-create-category-chip--active': selectedCategory === cat.slug }"
+                    :class="{
+                      'ik-create-category-chip--active':
+                        selectedCategory === cat.slug,
+                    }"
                     @click="selectCategory(cat.slug)"
                   >
                     {{ cat.name }}
@@ -1456,10 +1635,13 @@ if (import.meta.client) {
                       :disabled="isTagEditingDisabled"
                       @click="removeTag(idx)"
                     >
-                      <XMarkIcon style="width:12px;height:12px" />
+                      <XMarkIcon style="width: 12px; height: 12px" />
                     </button>
                   </span>
-                  <div v-if="selectedTags.length < MAX_TAGS" class="ik-create-tag-input-wrap">
+                  <div
+                    v-if="selectedTags.length < MAX_TAGS"
+                    class="ik-create-tag-input-wrap"
+                  >
                     <input
                       v-model="tagInput"
                       type="text"
@@ -1472,15 +1654,22 @@ if (import.meta.client) {
                       @compositionstart="onTagCompositionStart"
                       @compositionend="onTagCompositionEnd"
                     />
-                    <ul v-if="tagSuggestions.length" class="ik-create-tag-suggestions">
+                    <ul
+                      v-if="tagSuggestions.length"
+                      class="ik-create-tag-suggestions"
+                    >
                       <li
                         v-for="s in tagSuggestions"
                         :key="s.slug"
                         class="ik-create-tag-suggestion"
                         @mousedown.prevent="addTag(s.name)"
                       >
-                        <HashtagIcon style="width:12px;height:12px;opacity:0.5" />
-                        <span class="ik-create-tag-suggestion__name">{{ s.name }}</span>
+                        <HashtagIcon
+                          style="width: 12px; height: 12px; opacity: 0.5"
+                        />
+                        <span class="ik-create-tag-suggestion__name">{{
+                          s.name
+                        }}</span>
                       </li>
                     </ul>
                   </div>
@@ -1488,7 +1677,6 @@ if (import.meta.client) {
               </div>
             </div>
           </div>
-
         </div>
       </main>
     </div>
@@ -1498,7 +1686,10 @@ if (import.meta.client) {
       <div class="ik-create-footer__inner">
         <div class="ik-create-footer__left"></div>
         <div class="ik-create-footer__right">
-          <label class="ik-create-anon-toggle" :title="isAnonymous ? '取消匿名发布' : '匿名发布'">
+          <label
+            class="ik-create-anon-toggle"
+            :title="isAnonymous ? '取消匿名发布' : '匿名发布'"
+          >
             <span>匿名</span>
             <z-switch v-model="isAnonymous" @change="markDirty()" />
           </label>
@@ -1527,7 +1718,15 @@ if (import.meta.client) {
             :disabled="!canPublish"
             @click="publish"
           >
-            {{ isPublishing ? (isEditingPublished ? "更新中..." : "发布中...") : isEditingPublished ? "更新委托" : "发布委托" }}
+            {{
+              isPublishing
+                ? isEditingPublished
+                  ? "更新中..."
+                  : "发布中..."
+                : isEditingPublished
+                  ? "更新委托"
+                  : "发布委托"
+            }}
           </z-button>
         </div>
       </div>
@@ -1565,7 +1764,10 @@ if (import.meta.client) {
           <PhotoIcon class="ik-mobile-cover-add__icon" />
         </button>
         <button
-          v-if="externalVideos.length < MAX_EXTERNAL_VIDEOS && uploadTasks.length === 0"
+          v-if="
+            externalVideos.length < MAX_EXTERNAL_VIDEOS &&
+            uploadTasks.length === 0
+          "
           type="button"
           class="ik-mobile-cover-add"
           aria-label="添加视频"
@@ -1602,7 +1804,10 @@ if (import.meta.client) {
             v-else-if="task.status === 'pending'"
             class="ik-mobile-cover-tile__overlay"
           >
-            <span class="ik-mobile-cover-tile__spinner" aria-hidden="true"></span>
+            <span
+              class="ik-mobile-cover-tile__spinner"
+              aria-hidden="true"
+            ></span>
           </div>
           <div
             v-else-if="task.status === 'error'"
@@ -1616,14 +1821,16 @@ if (import.meta.client) {
               重试
             </button>
           </div>
-          <span v-if="idx === 0" class="ik-mobile-cover-tile__primary">封面</span>
+          <span v-if="idx === 0" class="ik-mobile-cover-tile__primary"
+            >封面</span
+          >
           <button
             type="button"
             class="ik-mobile-cover-tile__remove"
             aria-label="移除"
             @click.stop.prevent="removeUpload(idx)"
           >
-            <XMarkIcon style="width:12px;height:12px" />
+            <XMarkIcon style="width: 12px; height: 12px" />
           </button>
         </div>
         <div
@@ -1641,9 +1848,14 @@ if (import.meta.client) {
             referrerpolicy="no-referrer"
             @error="handleVideoCoverError($event, video)"
           />
-          <div v-if="!video.coverUrl || video.coverLoadError" class="ik-mobile-cover-tile__fallback">
+          <div
+            v-if="!video.coverUrl || video.coverLoadError"
+            class="ik-mobile-cover-tile__fallback"
+          >
             <FilmIcon class="ik-mobile-cover-tile__fallback-icon" />
-            <span class="ik-mobile-cover-tile__fallback-text">{{ video.bvid || `av${video.aid}` }}</span>
+            <span class="ik-mobile-cover-tile__fallback-text">{{
+              video.bvid || `av${video.aid}`
+            }}</span>
           </div>
           <div class="ik-mobile-cover-tile__play">
             <PlayIcon class="ik-mobile-cover-tile__play-icon" />
@@ -1654,7 +1866,7 @@ if (import.meta.client) {
             aria-label="移除"
             @click.stop.prevent="removeExternalVideo(idx)"
           >
-            <XMarkIcon style="width:12px;height:12px" />
+            <XMarkIcon style="width: 12px; height: 12px" />
           </button>
         </div>
       </div>
@@ -1676,7 +1888,11 @@ if (import.meta.client) {
       <div class="ik-mobile-divider"></div>
 
       <!-- Setting rows -->
-      <button type="button" class="ik-mobile-row" @click="isMobileCategoryOpen = true">
+      <button
+        type="button"
+        class="ik-mobile-row"
+        @click="isMobileCategoryOpen = true"
+      >
         <Squares2X2Icon class="ik-mobile-row__icon" />
         <span class="ik-mobile-row__title">分类</span>
         <span class="ik-mobile-row__value">{{ selectedCategoryName }}</span>
@@ -1685,19 +1901,31 @@ if (import.meta.client) {
 
       <div class="ik-mobile-divider"></div>
 
-      <button type="button" class="ik-mobile-row" @click="isMobileTagOpen = true">
+      <button
+        type="button"
+        class="ik-mobile-row"
+        @click="isMobileTagOpen = true"
+      >
         <HashtagIcon class="ik-mobile-row__icon" />
         <span class="ik-mobile-row__title">标签</span>
-        <span class="ik-mobile-row__value">{{ selectedTags.length ? `${selectedTags.length}/${MAX_TAGS}` : "未添加" }}</span>
+        <span class="ik-mobile-row__value">{{
+          selectedTags.length ? `${selectedTags.length}/${MAX_TAGS}` : "未添加"
+        }}</span>
         <ChevronRightIcon class="ik-mobile-row__chevron" />
       </button>
 
       <div class="ik-mobile-divider"></div>
 
-      <button type="button" class="ik-mobile-row" @click="openMobileCoverPicker">
+      <button
+        type="button"
+        class="ik-mobile-row"
+        @click="openMobileCoverPicker"
+      >
         <PhotoIcon class="ik-mobile-row__icon" />
         <span class="ik-mobile-row__title">封面</span>
-        <span class="ik-mobile-row__value">{{ uploadTasks.length }}/{{ maxCoverImages }}</span>
+        <span class="ik-mobile-row__value"
+          >{{ uploadTasks.length }}/{{ maxCoverImages }}</span
+        >
         <ChevronRightIcon class="ik-mobile-row__chevron" />
       </button>
 
@@ -1735,8 +1963,22 @@ if (import.meta.client) {
         :disabled="!canPublish"
         @click="publish"
       >
-        <span v-if="isPublishing" class="ik-mobile-footer__spinner" aria-hidden="true"></span>
-        {{ isPublishing ? (isEditingPublished ? "更新中..." : "发布中...") : isSavingDraft ? "正在保存" : isEditingPublished ? "更新" : "发布" }}
+        <span
+          v-if="isPublishing"
+          class="ik-mobile-footer__spinner"
+          aria-hidden="true"
+        ></span>
+        {{
+          isPublishing
+            ? isEditingPublished
+              ? "更新中..."
+              : "发布中..."
+            : isSavingDraft
+              ? "正在保存"
+              : isEditingPublished
+                ? "更新"
+                : "发布"
+        }}
       </button>
     </div>
 
@@ -1760,10 +2002,12 @@ if (import.meta.client) {
                 aria-label="关闭"
                 @click="isMobileDraftsOpen = false"
               >
-                <XMarkIcon style="width:20px;height:20px" />
+                <XMarkIcon style="width: 20px; height: 20px" />
               </button>
             </header>
-            <div class="ik-mobile-sheet__body ik-mobile-sheet__body--no-scrollbar">
+            <div
+              class="ik-mobile-sheet__body ik-mobile-sheet__body--no-scrollbar"
+            >
               <button
                 type="button"
                 class="ik-mobile-draft-row ik-mobile-draft-row--new"
@@ -1803,11 +2047,17 @@ if (import.meta.client) {
                 <InboxIcon class="ik-mobile-draft-empty__icon" />
                 <span>请先登录</span>
               </div>
-              <div v-else-if="draftsLoading && !drafts.length" class="ik-mobile-draft-empty">
+              <div
+                v-else-if="draftsLoading && !drafts.length"
+                class="ik-mobile-draft-empty"
+              >
                 <span class="ik-mobile-draft-spinner" aria-hidden="true"></span>
                 <span>加载中...</span>
               </div>
-              <div v-else-if="auth.isLogin && !drafts.length && !draftsLoading" class="ik-mobile-draft-empty">
+              <div
+                v-else-if="auth.isLogin && !drafts.length && !draftsLoading"
+                class="ik-mobile-draft-empty"
+              >
                 <InboxIcon class="ik-mobile-draft-empty__icon" />
                 <span>暂无草稿</span>
               </div>
@@ -1818,7 +2068,11 @@ if (import.meta.client) {
                 :disabled="draftsLoading"
                 @click="loadMoreDrafts"
               >
-                <span v-if="draftsLoading" class="ik-mobile-draft-spinner ik-mobile-draft-spinner--small" aria-hidden="true"></span>
+                <span
+                  v-if="draftsLoading"
+                  class="ik-mobile-draft-spinner ik-mobile-draft-spinner--small"
+                  aria-hidden="true"
+                ></span>
                 {{ draftsLoading ? "加载中..." : "加载更多" }}
               </button>
             </div>
@@ -1841,11 +2095,15 @@ if (import.meta.client) {
             <div class="ik-mobile-sheet__handle"></div>
             <span class="ik-mobile-sheet__title">委托设置</span>
             <div class="ik-mobile-sheet__body ik-mobile-sheet__body--compact">
-              <label class="ik-mobile-settings-row ik-mobile-settings-row--toggle">
+              <label
+                class="ik-mobile-settings-row ik-mobile-settings-row--toggle"
+              >
                 <EyeSlashIcon class="ik-mobile-settings-row__icon" />
                 <span class="ik-mobile-settings-row__text">
                   <span class="ik-mobile-settings-row__title">匿名发布</span>
-                  <span class="ik-mobile-settings-row__desc">开启后将隐藏你的身份</span>
+                  <span class="ik-mobile-settings-row__desc"
+                    >开启后将隐藏你的身份</span
+                  >
                 </span>
                 <z-switch v-model="isAnonymous" @change="markDirty()" />
               </label>
@@ -1890,22 +2148,32 @@ if (import.meta.client) {
           <div class="ik-mobile-sheet__panel">
             <div class="ik-mobile-sheet__handle"></div>
             <span class="ik-mobile-sheet__title">选择分类</span>
-            <div class="ik-mobile-sheet__body ik-mobile-sheet__body--compact ik-mobile-cat-grid">
+            <div
+              class="ik-mobile-sheet__body ik-mobile-sheet__body--compact ik-mobile-cat-grid"
+            >
               <button
                 v-for="cat in visibleCategories"
                 :key="cat.slug"
                 type="button"
                 class="ik-mobile-settings-row"
-                :class="{ 'ik-mobile-settings-row--active': selectedCategory === cat.slug }"
+                :class="{
+                  'ik-mobile-settings-row--active':
+                    selectedCategory === cat.slug,
+                }"
                 @click="onMobileSelectCategory(cat.slug)"
               >
-                <span class="ik-mobile-settings-row__title">{{ cat.name }}</span>
+                <span class="ik-mobile-settings-row__title">{{
+                  cat.name
+                }}</span>
                 <CheckIcon
                   v-if="selectedCategory === cat.slug"
                   class="ik-mobile-settings-row__check"
                 />
               </button>
-              <div v-if="!visibleCategories.length" class="ik-mobile-draft-empty">
+              <div
+                v-if="!visibleCategories.length"
+                class="ik-mobile-draft-empty"
+              >
                 {{ categoriesLoading ? "加载中..." : "暂无可选分类" }}
               </div>
             </div>
@@ -1929,13 +2197,25 @@ if (import.meta.client) {
           <div class="ik-mobile-sheet__panel ik-mobile-sheet__panel--tags">
             <div class="ik-mobile-sheet__handle"></div>
             <header class="ik-mobile-sheet__header">
-              <span id="ik-mobile-tags-title" class="ik-mobile-sheet__title">添加标签</span>
-              <button type="button" class="ik-mobile-sheet__close" aria-label="关闭标签编辑" @click="isMobileTagOpen = false">
-                <XMarkIcon style="width:20px;height:20px" />
+              <span id="ik-mobile-tags-title" class="ik-mobile-sheet__title"
+                >添加标签</span
+              >
+              <button
+                type="button"
+                class="ik-mobile-sheet__close"
+                aria-label="关闭标签编辑"
+                @click="isMobileTagOpen = false"
+              >
+                <XMarkIcon style="width: 20px; height: 20px" />
               </button>
             </header>
             <div class="ik-mobile-sheet__body ik-mobile-tag-body">
-              <p class="ik-mobile-tag-hint">已添加 {{ selectedTags.length }}/{{ MAX_TAGS }} 个，可搜索或创建标签</p>
+              <p class="ik-mobile-tag-hint">
+                已添加 {{ selectedTags.length }}/{{
+                  MAX_TAGS
+                }}
+                个，可搜索或创建标签
+              </p>
               <!-- 已选标签 chips -->
               <div v-if="selectedTags.length" class="ik-mobile-tag-chips">
                 <span
@@ -1957,7 +2237,10 @@ if (import.meta.client) {
               </div>
 
               <!-- 输入 + 联想（仅未达上限时可输入） -->
-              <div v-if="selectedTags.length < MAX_TAGS" class="ik-mobile-tag-input-row">
+              <div
+                v-if="selectedTags.length < MAX_TAGS"
+                class="ik-mobile-tag-input-row"
+              >
                 <HashtagIcon class="ik-mobile-tag-input-row__icon" />
                 <input
                   v-model="tagInput"
@@ -1976,23 +2259,34 @@ if (import.meta.client) {
                 <button
                   type="button"
                   class="ik-mobile-tag-add-btn"
-                  :disabled="!tagInput.trim() || isTagComposing || isTagEditingDisabled"
+                  :disabled="
+                    !tagInput.trim() || isTagComposing || isTagEditingDisabled
+                  "
                   @click="addTag(tagInput)"
                 >
                   添加
                 </button>
               </div>
-              <p v-else class="ik-mobile-tag-limit-hint">已达上限（最多 {{ MAX_TAGS }} 个）</p>
+              <p v-else class="ik-mobile-tag-limit-hint">
+                已达上限（最多 {{ MAX_TAGS }} 个）
+              </p>
 
               <!-- 联想候选 -->
-              <ul v-if="tagSuggestions.length" class="ik-mobile-tag-suggestions">
-                <li
-                  v-for="s in tagSuggestions"
-                  :key="`m-sug-${s.slug}`"
-                >
-                  <button type="button" class="ik-mobile-tag-suggestion" :disabled="isTagEditingDisabled" @click="addTag(s.name)">
+              <ul
+                v-if="tagSuggestions.length"
+                class="ik-mobile-tag-suggestions"
+              >
+                <li v-for="s in tagSuggestions" :key="`m-sug-${s.slug}`">
+                  <button
+                    type="button"
+                    class="ik-mobile-tag-suggestion"
+                    :disabled="isTagEditingDisabled"
+                    @click="addTag(s.name)"
+                  >
                     <HashtagIcon class="ik-mobile-tag-suggestion__icon" />
-                    <span class="ik-mobile-tag-suggestion__name">{{ s.name }}</span>
+                    <span class="ik-mobile-tag-suggestion__name">{{
+                      s.name
+                    }}</span>
                   </button>
                 </li>
               </ul>
@@ -2060,7 +2354,7 @@ if (import.meta.client) {
 
 .ik-create-exam-gate__panel {
   padding: 4px;
-  background: #2D2C2D;
+  background: #2d2c2d;
   border-radius: 24px 0 24px 24px;
   overflow: hidden;
 }
@@ -2114,7 +2408,7 @@ if (import.meta.client) {
   align-items: center;
   gap: 16px;
   padding: 48px 64px;
-  border: 2px dashed #BFFF09;
+  border: 2px dashed #bfff09;
   border-radius: 24px;
   background: rgba(215, 255, 0, 0.04);
 }
@@ -2122,15 +2416,19 @@ if (import.meta.client) {
 .ik-create-drop-overlay__text {
   font-size: 18px;
   font-weight: 700;
-  color: #BFFF09;
+  color: #bfff09;
   letter-spacing: 0.5px;
 }
 
 /* ── Transition helpers ──────────────────────────── */
 .ik-fade-enter-active,
-.ik-fade-leave-active { transition: opacity 200ms ease; }
+.ik-fade-leave-active {
+  transition: opacity 200ms ease;
+}
 .ik-fade-enter-from,
-.ik-fade-leave-to { opacity: 0; }
+.ik-fade-leave-to {
+  opacity: 0;
+}
 
 /* ── Two-Column Layout ───────────────────────────── */
 .ik-create-columns {
@@ -2208,7 +2506,7 @@ if (import.meta.client) {
 
 .ik-nav-item__editing-arrow {
   font-size: 10px;
-  color: #BFFF09;
+  color: #bfff09;
 }
 
 .ik-create-menu :deep(.z-menu__item.is-active) .ik-nav-item__editing-arrow {
@@ -2226,12 +2524,14 @@ if (import.meta.client) {
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 200ms, color 200ms;
+  transition:
+    border-color 200ms,
+    color 200ms;
 }
 
 .ik-nav-loadmore:hover:not(:disabled) {
-  border-color: #BFFF09;
-  color: #BFFF09;
+  border-color: #bfff09;
+  color: #bfff09;
 }
 
 .ik-nav-loadmore:disabled {
@@ -2252,7 +2552,7 @@ if (import.meta.client) {
   display: flex;
   flex-direction: column;
   padding: 4px;
-  background: #2D2C2D;
+  background: #2d2c2d;
   border-radius: 24px 0 24px 24px;
   overflow: hidden;
   min-height: 0;
@@ -2435,15 +2735,17 @@ if (import.meta.client) {
     background 0.15s ease;
 }
 
-.ik-create-category-chip:hover:not(.ik-create-category-chip--active):not(.ik-create-category-chip--placeholder) {
+.ik-create-category-chip:hover:not(.ik-create-category-chip--active):not(
+    .ik-create-category-chip--placeholder
+  ) {
   border-color: #3a3a3a;
   color: #fff;
 }
 
 .ik-create-category-chip--active {
   color: #222;
-  background: var(--ik-primary, #BFFF09);
-  border-color: var(--ik-primary, #BFFF09);
+  background: var(--ik-primary, #bfff09);
+  border-color: var(--ik-primary, #bfff09);
   font-weight: 700;
 }
 
@@ -2517,7 +2819,9 @@ if (import.meta.client) {
   color: #bbb;
   cursor: pointer;
   line-height: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .ik-create-tag-chip__remove svg {
@@ -2663,7 +2967,9 @@ if (import.meta.client) {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   background: #050505;
-  transition: border-color 220ms, box-shadow 220ms;
+  transition:
+    border-color 220ms,
+    box-shadow 220ms;
   overflow: hidden;
 }
 
@@ -2709,7 +3015,6 @@ if (import.meta.client) {
   outline: none;
 }
 
-
 .ik-media-add-row {
   display: flex;
   flex-wrap: wrap;
@@ -2730,12 +3035,15 @@ if (import.meta.client) {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: border-color 200ms, color 200ms, background 200ms;
+  transition:
+    border-color 200ms,
+    color 200ms,
+    background 200ms;
 }
 
 .ik-media-add-row__btn:hover {
-  border-color: #BFFF09;
-  color: #BFFF09;
+  border-color: #bfff09;
+  color: #bfff09;
   background: rgba(191, 255, 9, 0.08);
 }
 
@@ -2773,7 +3081,10 @@ if (import.meta.client) {
   overflow: hidden;
   border: 2px solid transparent;
   background: #1e1e1e;
-  transition: border-color 200ms, background 200ms, transform 200ms;
+  transition:
+    border-color 200ms,
+    background 200ms,
+    transform 200ms;
 }
 
 .ik-cover-thumb:hover {
@@ -2883,7 +3194,7 @@ if (import.meta.client) {
 .ik-cover-thumb__retry {
   padding: 3px 12px;
   border-radius: 999px;
-  background: #BFFF09;
+  background: #bfff09;
   color: #000;
   font-size: 11px;
   font-weight: 900;
@@ -2908,7 +3219,7 @@ if (import.meta.client) {
 
 .ik-cover-thumb__progress {
   height: 100%;
-  background: #BFFF09;
+  background: #bfff09;
   border-radius: 2px;
   transition: width 200ms;
 }
@@ -2918,12 +3229,14 @@ if (import.meta.client) {
   height: 22px;
   border-radius: 50%;
   border: 2.5px solid rgba(215, 255, 0, 0.25);
-  border-top-color: #BFFF09;
+  border-top-color: #bfff09;
   animation: ik-cover-spin 800ms linear infinite;
 }
 
 @keyframes ik-cover-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ik-cover-thumb__primary {
@@ -2932,7 +3245,7 @@ if (import.meta.client) {
   top: 6px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #BFFF09;
+  background: #bfff09;
   color: #000;
   font-size: 10px;
   font-weight: 900;
@@ -2955,7 +3268,9 @@ if (import.meta.client) {
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 150ms, background 150ms;
+  transition:
+    opacity 150ms,
+    background 150ms;
 }
 
 .ik-cover-thumb:hover .ik-cover-thumb__remove,
@@ -3015,7 +3330,7 @@ if (import.meta.client) {
   font-size: 11px;
   font-weight: 700;
   font-style: italic;
-  color: #BFFF09;
+  color: #bfff09;
   letter-spacing: 0.5px;
 }
 
@@ -3087,7 +3402,6 @@ if (import.meta.client) {
     grid-template-columns: minmax(0, 1fr) minmax(220px, 1fr);
     gap: 12px 16px;
   }
-
 }
 
 @media (min-width: 769px) and (max-height: 700px) {
@@ -3232,7 +3546,9 @@ if (import.meta.client) {
     background: #1a1a1a;
     font-family: inherit;
     cursor: pointer;
-    transition: border-color 160ms ease, background 160ms ease;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease;
   }
   .ik-mobile-cover-add:disabled {
     cursor: not-allowed;
@@ -3282,7 +3598,7 @@ if (import.meta.client) {
     width: 22px;
     height: 22px;
     border: 2.5px solid rgba(215, 255, 0, 0.25);
-    border-top-color: #BFFF09;
+    border-top-color: #bfff09;
     border-radius: 50%;
     animation: ik-mobile-spin 800ms linear infinite;
   }
@@ -3291,7 +3607,7 @@ if (import.meta.client) {
     border: 0;
     padding: 3px 10px;
     border-radius: 10px;
-    background: #BFFF09;
+    background: #bfff09;
     color: #000;
     font-size: 11px;
     font-weight: 900;
@@ -3367,7 +3683,9 @@ if (import.meta.client) {
   }
 
   @keyframes ik-mobile-spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* ── Title (flat) ─────────────────────────────── */
@@ -3524,7 +3842,7 @@ if (import.meta.client) {
     border: 0;
     height: 42px;
     border-radius: 21px;
-    background: #BFFF09;
+    background: #bfff09;
     color: #000;
     font-family: inherit;
     font-size: 15px;
@@ -3534,7 +3852,9 @@ if (import.meta.client) {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: filter 140ms ease, background 140ms ease;
+    transition:
+      filter 140ms ease,
+      background 140ms ease;
   }
   .ik-mobile-footer__publish:active:not(.is-disabled) {
     filter: brightness(0.92);
@@ -3627,7 +3947,9 @@ if (import.meta.client) {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
 }
 .ik-mobile-sheet__close:active {
   background: rgba(255, 255, 255, 0.08);
@@ -3727,7 +4049,7 @@ if (import.meta.client) {
 }
 
 .ik-mobile-tag-input-row:focus-within {
-  border-color: var(--ik-primary, #BFFF09);
+  border-color: var(--ik-primary, #bfff09);
 }
 
 .ik-mobile-tag-input-row__icon,
@@ -3762,7 +4084,7 @@ if (import.meta.client) {
   padding: 0 14px;
   border: 0;
   border-radius: 8px;
-  background: var(--ik-primary, #BFFF09);
+  background: var(--ik-primary, #bfff09);
   color: #111;
   font: inherit;
   font-size: 14px;
@@ -3832,15 +4154,18 @@ if (import.meta.client) {
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  transition: background 200ms ease, border-color 200ms ease, color 200ms ease;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease;
   font-family: inherit;
 }
 .ik-mobile-draft-row:active {
   background: #262626;
 }
 .ik-mobile-draft-row.is-active {
-  border-color: #BFFF09;
-  background: #BFFF09;
+  border-color: #bfff09;
+  background: #bfff09;
 }
 .ik-mobile-draft-row__icon {
   width: 22px;
@@ -3883,10 +4208,10 @@ if (import.meta.client) {
   color: rgba(0, 0, 0, 0.55);
 }
 .ik-mobile-draft-row--new .ik-mobile-draft-row__icon {
-  color: #BFFF09;
+  color: #bfff09;
 }
 .ik-mobile-draft-row--new .ik-mobile-draft-row__title {
-  color: #BFFF09;
+  color: #bfff09;
 }
 .ik-mobile-draft-row--new.is-active .ik-mobile-draft-row__icon,
 .ik-mobile-draft-row--new.is-active .ik-mobile-draft-row__title {
@@ -3914,7 +4239,7 @@ if (import.meta.client) {
   height: 18px;
   border-radius: 50%;
   border: 2px solid rgba(215, 255, 0, 0.25);
-  border-top-color: #BFFF09;
+  border-top-color: #bfff09;
   animation: ik-draft-spin 800ms linear infinite;
 }
 .ik-mobile-draft-spinner--small {
@@ -3927,7 +4252,9 @@ if (import.meta.client) {
 }
 
 @keyframes ik-draft-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ik-mobile-draft-loadmore {
@@ -3947,7 +4274,9 @@ if (import.meta.client) {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  transition: background 140ms ease, opacity 140ms ease;
+  transition:
+    background 140ms ease,
+    opacity 140ms ease;
 }
 .ik-mobile-draft-loadmore:active {
   background: rgba(255, 255, 255, 0.04);
@@ -3959,7 +4288,9 @@ if (import.meta.client) {
 
 /* ── Draft list entry animation ────────────────── */
 .ik-draft-list-enter-active {
-  transition: opacity 250ms ease, transform 250ms ease;
+  transition:
+    opacity 250ms ease,
+    transform 250ms ease;
 }
 .ik-draft-list-enter-from {
   opacity: 0;
@@ -4012,11 +4343,11 @@ if (import.meta.client) {
 }
 /* 选中态：项目统一特效——黑字 + 主题色底 */
 .ik-mobile-settings-row--active {
-  background: var(--ik-primary, #BFFF09);
-  border-color: var(--ik-primary, #BFFF09);
+  background: var(--ik-primary, #bfff09);
+  border-color: var(--ik-primary, #bfff09);
 }
 .ik-mobile-settings-row--active:active {
-  background: var(--ik-primary, #BFFF09);
+  background: var(--ik-primary, #bfff09);
 }
 .ik-mobile-settings-row--active .ik-mobile-settings-row__title {
   color: #222;
@@ -4076,7 +4407,9 @@ if (import.meta.client) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
@@ -4237,8 +4570,8 @@ if (import.meta.client) {
   color: #b2b4ae;
 }
 .ik-create-footer {
-  position: sticky;
-  bottom: 12px;
+  position: relative;
+  bottom: auto;
   background: #080808 url("/images/tab-bg-point.webp") repeat;
   border: 3px solid #313131;
   border-radius: 999px;
@@ -4323,6 +4656,32 @@ if (import.meta.client) {
   }
   .ik-create-page > .ik-terminal-masthead {
     margin-bottom: 0;
+  }
+}
+
+/* Publish actions belong to document flow, never the viewport centre. */
+.ik-create-page .ik-create-columns,
+.ik-create-page .ik-create-panel,
+.ik-create-page .ik-create-panel__body {
+  min-height: min-content;
+  max-height: none;
+  overflow: visible;
+}
+.ik-create-page .ik-create-footer {
+  position: relative;
+  bottom: auto;
+  top: auto;
+  transform: none;
+  margin-top: 20px;
+  align-self: stretch;
+}
+@media (max-width: 768px) {
+  .ik-create-page .ik-mobile-footer {
+    position: static;
+    inset: auto;
+    transform: none;
+    margin: 16px 8px 0;
+    width: calc(100% - 16px);
   }
 }
 </style>

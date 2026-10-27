@@ -56,6 +56,7 @@ const fs = require("node:fs"),
       cwd: require("node:path").resolve(__dirname, ".."),
       env: {
         ...process.env,
+        AI_SEED_CATALOG: "1",
         PORT: "39132",
         DATA_DIR: data,
         ADMIN_USERNAMES: "",
@@ -147,7 +148,7 @@ const fs = require("node:fs"),
               text: "Explicit browser fixture, not a live Wiki result. ".repeat(
                 40,
               ),
-              part: "Lore",
+              part: "",
             },
           },
         )
@@ -531,6 +532,12 @@ const fs = require("node:fs"),
       ),
       false,
     );
+    const footerLayout=await admin.evaluate(()=>{
+      const footer=document.querySelector('.ik-create-footer'),body=document.querySelector('.ik-create-panel__body');
+      return {footer:footer.getBoundingClientRect().top,bodyBottom:body.getBoundingClientRect().bottom,position:getComputedStyle(footer).position};
+    });
+    assert.ok(footerLayout.footer>=footerLayout.bodyBottom,'publish bar must follow all editor content, not overlap it: '+JSON.stringify(footerLayout));
+    assert.ok(!['fixed','sticky'].includes(footerLayout.position));
     await admin.screenshot({ path: "/tmp/sw-commission-desktop.png" });
     await admin.setViewportSize({ width: 390, height: 844 });
     await admin.locator(".ik-create-mobile").waitFor();
@@ -540,6 +547,7 @@ const fs = require("node:fs"),
       ),
       false,
     );
+    assert.equal(await admin.locator('.ik-mobile-footer').evaluate(el=>getComputedStyle(el).position),'static');
     await admin.screenshot({ path: "/tmp/sw-commission-mobile.png" });
     console.log(
       "PASS desktop and mobile commission workspace runtime, no horizontal overflow",
@@ -578,6 +586,23 @@ const fs = require("node:fs"),
       false,
     );
     console.log("PASS private task UI save/reload and mobile layout");
+    await admin.setViewportSize({width:1440,height:1000});
+    assert.equal((await admin.request.patch(base+'/v1/admin/users/'+me.id,{data:{polychrome:60}})).status(),200);
+    await admin.goto(base+'/profile/'+me.id);
+    await admin.getByRole('button',{name:'修改名片',exact:true}).click();
+    await admin.locator('.custom-card-upload').waitFor();
+    const purchased=admin.waitForResponse(r=>r.url().endsWith('/v1/me/card')&&r.request().method()==='PUT');
+    admin.once('dialog',d=>d.accept());
+    await admin.locator('.custom-card-upload input[type=file]').setInputFiles(imageFile);
+    const purchase=await purchased;assert.equal(purchase.status(),200);assert.equal((await purchase.json()).polychrome,40);
+    const cards=await (await admin.request.get(base+'/v1/me/cards')).json();
+    assert.ok(cards.equippedCard);assert.ok(cards.items.some(c=>c.id===cards.equippedCard.id));
+    await admin.reload();
+    assert.equal((await (await admin.request.get(base+'/v1/me')).json()).polychrome,40);
+    const wallet=admin.locator('.ik-header-polychrome');await wallet.waitFor();
+    assert.ok(await wallet.evaluate(el=>el.previousElementSibling.classList.contains('ik-header-denny')));
+    console.log('PASS custom name-card upload and auto-equip, exact 20-polychrome debit, persistence, matching adjacent currency widgets');
+
   } catch (e) {
     console.error(e);
     process.exitCode = 1;

@@ -146,8 +146,8 @@ onBeforeUnmount(() => {
       <p>
         仅限角色相关话题。这是本站AI角色扮演，不是官方角色本人。未审核或未配置的角色不能聊天。
       </p>
-      <button @click="loadRoles">刷新角色状态</button
-      ><button
+      <IkActionButton @click="loadRoles">刷新角色状态</IkActionButton
+      ><IkActionButton
         v-for="r in roles"
         :key="r.id"
         class="role"
@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
           >{{ r.name
           }}<small>{{ r.available ? "可聊天" : "待配置 / 审核" }}</small></span
         >
-      </button>
+      </IkActionButton>
     </aside>
     <article>
       <template v-if="active"
@@ -181,7 +181,9 @@ onBeforeUnmount(() => {
           >
         </details>
         <p v-if="error" role="alert">{{ error }}</p>
-        <button v-if="cursor" @click="history(true)">更早的对话</button>
+        <IkActionButton v-if="cursor" @click="history(true)"
+          >更早的对话</IkActionButton
+        >
         <div ref="box" class="ai-timeline" aria-live="polite">
           <div
             v-for="m in items"
@@ -209,9 +211,11 @@ onBeforeUnmount(() => {
             placeholder="仅聊角色相关的话题…"
             maxlength="3000"
             :disabled="busy || !active.available"
-          /><button :disabled="busy || !active.available || !content.trim()">
+          /><IkActionButton
+            :disabled="busy || !active.available || !content.trim()"
+          >
             {{ busy ? "角色正在回复…" : "发送给角色" }}
-          </button>
+          </IkActionButton>
         </form>
         <small
           >每账号每分钟5次、滚动24小时50次；不要发送口令和隐私。回复会被模型服务处理。</small
@@ -257,7 +261,7 @@ onBeforeUnmount(() => {
 .role[aria-pressed="true"] {
   border-color: #d7fa00;
 }
-.ai-chat button {
+.ai-chat button:not(.z-button) {
   border: 1px solid #69754c;
   background: #222b17;
   color: #e5ecd9;

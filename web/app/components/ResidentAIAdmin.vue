@@ -24,6 +24,14 @@ interface Job {
   roleId: string;
   state: string;
   error?: string;
+  progress?: {
+    total: number;
+    completed: number;
+    imported: number;
+    generated: number;
+    failed: number;
+    current: string;
+  };
   result?: {
     postId?: string;
     message?: string;
@@ -125,24 +133,26 @@ async function batch(action: "delete" | "wiki" | "avatar") {
   });
 }
 const editAvatar = ref("");
-const skipForeignNames = ref(true);
+const skipForeignNames = ref(false);
 const sourceText = ref(""),
   editWiki = ref(""),
   editName = ref("");
 const manualText = ref(""),
-  manualPart = ref("Lore"),
+  manualPart = ref(""),
   manualRevision = ref<number | undefined>();
 const connectionJob = ref(""),
   connectionStarted = ref(0),
   pollingError = ref("");
 const stateNames: Record<string, string> = {
+  cancelled: "已中断",
   queued: "排队中",
   running: "处理中",
   done: "成功",
   failed: "失败",
 };
 const kindNames: Record<string, string> = {
-  wiki: "Wiki导入",
+  "full-sync": "萌娘百科全角色提示词流水线",
+  wiki: "萌娘百科导入",
   dossier: "档案生成",
   catalog: "角色发现",
   article: "文章写作",
@@ -247,13 +257,16 @@ const current = computed(() =>
 function detail(e: unknown) {
   return (e as { data?: { detail?: string } }).data?.detail || "AI管理请求失败";
 }
+let loadRevision = 0;
 async function load() {
+  const revision = ++loadRevision;
   try {
     const [c, r, j] = await Promise.all([
       $fetch<typeof config.value>("/v1/admin/ai/config"),
       $fetch<{ items: Role[] }>("/v1/admin/ai/roles"),
       $fetch<{ items: Job[] }>("/v1/admin/ai/jobs"),
     ]);
+    if (revision !== loadRevision) return;
     config.value = c;
     roles.value = r.items;
     const live = new Set(r.items.map((item) => item.id));
@@ -266,6 +279,7 @@ async function load() {
 async function act(fn: () => Promise<unknown>) {
   if (busy.value) return;
   busy.value = true;
+  loadRevision++;
   error.value = "";
   try {
     await fn();
@@ -342,6 +356,41 @@ async function refreshAvatar() {
     });
   });
 }
+async function fullSync() {
+  if (
+    !confirm(
+      "从萌娘百科发现全角色并逐个抓取原文、调用模型概括为角色提示词资料。可能产生较多模型费用，可随时中断；完成后仍需审核启用。继续？",
+    )
+  )
+    return;
+  await act(async () => {
+    await $fetch("/v1/admin/ai/full-sync", {
+      method: "POST",
+      body: { clientId: crypto.randomUUID() },
+    });
+    notice.value = "全角色流水线已入队，按真实抓取结果生成，不会伪造缺失资料。";
+  });
+}
+async function cancelJob(id: string) {
+  await act(async () => {
+    await $fetch(`/v1/admin/ai/jobs/${id}/cancel`, { method: "POST" });
+  });
+}
+async function deleteLog(id?: string) {
+  if (
+    !confirm(
+      id
+        ? "删除这条已结束任务日志？"
+        : "清空所有已结束的管理任务日志？运行中的任务和审计记录不受影响。",
+    )
+  )
+    return;
+  await act(async () => {
+    await $fetch("/v1/admin/ai/jobs" + (id ? "/" + id : ""), {
+      method: "DELETE",
+    });
+  });
+}
 async function catalog() {
   await act(async () => {
     await $fetch("/v1/admin/ai/catalog-sync", {
@@ -352,7 +401,7 @@ async function catalog() {
       },
     });
     notice.value =
-      "Wiki代理人目录发现任务已入队（不扫描NPCs/邦布目录）；新发现项保持停用，资料仍需导入、生成与审核。";
+      "萌娘百科角色发现任务已入队；新发现项保持停用，资料仍需导入、生成与审核。";
   });
 }
 async function dossiers() {
@@ -440,7 +489,9 @@ onBeforeUnmount(() => {
   <div class="resident-admin">
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
-    <button :disabled="busy" @click="load">刷新AI任务与资料</button>
+    <IkActionButton :disabled="busy" @click="load"
+      >刷新AI任务与资料</IkActionButton
+    >
     <article>
       <h2>New API 配置</h2>
       <p v-if="pollingError" role="alert">自动刷新失败：{{ pollingError }}</p>
@@ -479,11 +530,11 @@ onBeforeUnmount(() => {
             type="checkbox"
           />强制JSON模式（模型不支持 response_format
           时关闭；仍会校验输出JSON）</label
-        ><button :disabled="busy">保存New API配置</button>
+        ><IkActionButton :disabled="busy">保存New API配置</IkActionButton>
       </form>
-      <button :disabled="busy" @click="testConnection">
+      <IkActionButton :disabled="busy" @click="testConnection">
         测试已保存配置的连接
-      </button>
+      </IkActionButton>
       <p
         v-if="connection"
         class="connection-result"
@@ -500,7 +551,13 @@ onBeforeUnmount(() => {
       </p>
     </article>
     <article>
-      <h2>驻站角色资料与审核</h2>
+      <h2>萌娘百科 · 全角色资料与提示词</h2>
+      <p>
+        本次升级已一次性强制清理旧Wiki角色目录，重新使用萌娘百科。全角色来源抓取→AI概括→资料审核→启用；缺失或被源站拒绝的页面明确报错，不伪造完成。
+      </p>
+      <IkActionButton :disabled="busy" @click="fullSync"
+        >全角色导入并生成提示词（消耗模型额度）</IkActionButton
+      >
       <label
         ><input
           type="checkbox"
@@ -516,22 +573,34 @@ onBeforeUnmount(() => {
             placeholder="输入中文名或英文标题"
         /></label>
         <div class="role-selection-tools">
-          <button
+          <IkActionButton
             type="button"
             :disabled="busy"
             @click="checkedRoles = roles.map((r) => r.id)"
           >
             全选全部
-          </button>
-          <button type="button" :disabled="busy" @click="selectResults()">
+          </IkActionButton>
+          <IkActionButton
+            type="button"
+            :disabled="busy"
+            @click="selectResults()"
+          >
             全选搜索结果
-          </button>
-          <button type="button" :disabled="busy" @click="selectResults(true)">
+          </IkActionButton>
+          <IkActionButton
+            type="button"
+            :disabled="busy"
+            @click="selectResults(true)"
+          >
             反选搜索结果
-          </button>
-          <button type="button" :disabled="busy" @click="checkedRoles = []">
+          </IkActionButton>
+          <IkActionButton
+            type="button"
+            :disabled="busy"
+            @click="checkedRoles = []"
+          >
             取消全选
-          </button>
+          </IkActionButton>
         </div>
         <p>
           已选
@@ -547,47 +616,58 @@ onBeforeUnmount(() => {
               type="checkbox"
               :value="r.id"
               :disabled="busy"
-            /><button type="button" :disabled="busy" @click="selected = r.id">
-              {{ r.name }}</button
+            /><IkActionButton
+              type="button"
+              :disabled="busy"
+              @click="selected = r.id"
+            >
+              {{ r.name }}</IkActionButton
             ><span
               >{{ r.wiki }} · {{ r.enabled ? "启用" : "停用" }} ·
               {{ r.sourceStatus }}</span
             ></label
           >
         </div>
-        <button :disabled="busy || !checkedRoles.length" @click="batch('wiki')">
-          导入选中角色Wiki</button
-        ><button
+        <IkActionButton
+          :disabled="busy || !checkedRoles.length"
+          @click="batch('wiki')"
+        >
+          导入选中角色Wiki</IkActionButton
+        ><IkActionButton
           :disabled="busy || !checkedRoles.length"
           @click="batch('avatar')"
         >
-          更新选中角色头像</button
-        ><button
+          更新选中角色头像</IkActionButton
+        ><IkActionButton
           class="danger"
           :disabled="busy || !checkedRoles.length"
           @click="batch('delete')"
         >
           删除选中角色
-        </button>
+        </IkActionButton>
       </details>
-      <button class="danger" :disabled="busy" @click="cleanupCatalog">
+      <IkActionButton class="danger" :disabled="busy" @click="cleanupCatalog">
         清理旧版误导入NPC候选
-      </button>
+      </IkActionButton>
       <p>
         自动发现仅扫描代理人 Agents，不再扫描整个 NPCs
         分类。哲、铃、Fairy等已有内置角色保留；其他指定角色可手动添加Wiki。
       </p>
-      <button :disabled="busy" @click="dedupe">清理不同语言的重复目录项</button>
+      <IkActionButton :disabled="busy" @click="dedupe"
+        >清理不同语言的重复目录项</IkActionButton
+      >
       <p>
         流程：导入Wiki → 生成详细档案 → 核对来源与档案 → 审核 →
         启用。未核实角色不会自动上线。Wiki/模型内容是不可信资料，不赋予执行权限。防套话是多层防护，不承诺绝对防逆向。
       </p>
-      <button :disabled="busy" @click="avatars">
-        批量更新Wiki头像（不重置档案）</button
-      ><button :disabled="busy" @click="catalog">从Wiki发现代理人目录</button
-      ><button :disabled="busy" @click="syncAll">批量导入全部角色Wiki</button
-      ><button :disabled="busy" @click="dossiers">
-        批量生成详细档案（消耗模型额度）</button
+      <IkActionButton :disabled="busy" @click="avatars">
+        批量更新Wiki头像（不重置档案）</IkActionButton
+      ><IkActionButton :disabled="busy" @click="catalog"
+        >从萌娘百科发现全角色目录</IkActionButton
+      ><IkActionButton :disabled="busy" @click="syncAll"
+        >批量导入全部角色Wiki</IkActionButton
+      ><IkActionButton :disabled="busy" @click="dossiers">
+        批量生成详细档案（消耗模型额度）</IkActionButton
       ><label
         >选择角色<select v-model="selected">
           <option value="">请选择（{{ roles.length }}个目录项）</option>
@@ -599,20 +679,31 @@ onBeforeUnmount(() => {
       >
       <template v-if="current"
         ><h3>{{ current.name }} · {{ current.wiki }}</h3>
-        <button class="danger" :disabled="busy" @click="removeRole(true)">
-          清空Wiki资料</button
-        ><button class="danger" :disabled="busy" @click="removeRole(false)">
+        <IkActionButton
+          class="danger"
+          :disabled="busy"
+          @click="removeRole(true)"
+        >
+          清空Wiki资料</IkActionButton
+        ><IkActionButton
+          class="danger"
+          :disabled="busy"
+          @click="removeRole(false)"
+        >
           删除此角色
-        </button>
+        </IkActionButton>
         <ImageUploadInput
           :key="current.id"
           v-model="editAvatar"
           label="角色头像"
           :disabled="busy"
         />
-        <button :disabled="busy" @click="patch({ avatarUrl: editAvatar })">
+        <IkActionButton
+          :disabled="busy"
+          @click="patch({ avatarUrl: editAvatar })"
+        >
           保存角色头像
-        </button>
+        </IkActionButton>
         <p>
           头像来源：{{
             current.avatarSource === "manual"
@@ -630,25 +721,30 @@ onBeforeUnmount(() => {
             >角色Wiki图片来源</a
           >
         </p>
-        <button :disabled="busy" @click="patch({ avatarSource: 'wiki' })">
+        <IkActionButton
+          :disabled="busy"
+          @click="patch({ avatarSource: 'wiki' })"
+        >
           恢复Wiki自动头像（随后点击获取）
-        </button>
-        <button
+        </IkActionButton>
+        <IkActionButton
           :disabled="busy || current.avatarSource === 'manual'"
           @click="refreshAvatar"
         >
-          获取此角色Wiki头像</button
+          获取此角色Wiki头像</IkActionButton
         ><label>显示名<input v-model="editName" maxlength="60" /></label
         ><label
           >Wiki页面标题（修正后需要重新导入/生成/审核）<input
             v-model="editWiki"
             maxlength="120" /></label
-        ><button
+        ><IkActionButton
           :disabled="busy"
           @click="patch({ name: editName, wiki: editWiki })"
         >
-          保存名称 / Wiki标题</button
-        ><button :disabled="busy" @click="source">查看导入原文以核对</button>
+          保存名称 / Wiki标题</IkActionButton
+        ><IkActionButton :disabled="busy" @click="source"
+          >查看导入原文以核对</IkActionButton
+        >
         <details v-if="sourceText">
           <summary>Wiki导入原文（仅资料）</summary>
           <pre>{{ sourceText }}</pre>
@@ -667,18 +763,19 @@ onBeforeUnmount(() => {
             {{ s.verification || "服务器抓取" }}
           </li>
         </ul>
-        <button :disabled="busy" @click="task('wiki')">导入此角色Wiki</button
-        ><button
+        <IkActionButton :disabled="busy" @click="task('wiki')"
+          >导入此角色Wiki</IkActionButton
+        ><IkActionButton
           :disabled="busy || current.sourceStatus !== 'imported'"
           @click="task('dossier')"
         >
-          生成非常详细的角色档案</button
-        ><button
+          生成非常详细的角色档案</IkActionButton
+        ><IkActionButton
           :disabled="busy || !current.dossier"
           @click="dossierText = JSON.stringify(current.dossier, null, 2)"
         >
           载入最新档案到编辑器
-        </button>
+        </IkActionButton>
         <details>
           <summary>Wiki网络受限时：手动导入Wiki原文</summary>
           <p>
@@ -687,9 +784,6 @@ onBeforeUnmount(() => {
           <label
             >页面部分<select v-model="manualPart">
               <option value="">主页面</option>
-              <option value="Lore">Lore</option>
-              <option value="Voice-Overs">Voice-Overs</option>
-              <option value="DMs">DMs</option>
             </select></label
           ><label
             >Wiki修订号（可选）<input
@@ -702,12 +796,12 @@ onBeforeUnmount(() => {
               rows="10"
               maxlength="90000"
             /></label
-          ><button
+          ><IkActionButton
             :disabled="busy || manualText.length < 800"
             @click="manualImport"
           >
             导入粘贴的Wiki原文
-          </button>
+          </IkActionButton>
         </details>
         <label
           >详细档案（JSON）<textarea
@@ -715,19 +809,19 @@ onBeforeUnmount(() => {
             rows="18"
             spellcheck="false"
           /></label
-        ><button :disabled="busy" @click="saveDossier">
-          保存档案（重置审核）</button
-        ><button
+        ><IkActionButton :disabled="busy" @click="saveDossier">
+          保存档案（重置审核）</IkActionButton
+        ><IkActionButton
           :disabled="busy || !current.dossier"
           @click="patch({ approved: true })"
         >
-          我已核对Wiki，审核通过</button
-        ><button
+          我已核对Wiki，审核通过</IkActionButton
+        ><IkActionButton
           :disabled="busy || !current.approved"
           @click="patch({ enabled: !current.enabled })"
         >
           {{ current.enabled ? "停用角色" : "启用角色" }}
-        </button></template
+        </IkActionButton></template
       >
     </article>
     <article>
@@ -751,7 +845,9 @@ onBeforeUnmount(() => {
             required
             placeholder="以角色第一人称分享一次与同伴相关的新艾利都日常，明确是同人创作。"
           /></label
-        ><button :disabled="busy || !command.trim()">生成文章草稿</button>
+        ><IkActionButton :disabled="busy || !command.trim()"
+          >生成文章草稿</IkActionButton
+        >
       </form>
       <p>不会直接发布；成功后到帖子栏目审核并公开，作者带AI标识。</p>
     </article>
@@ -761,16 +857,19 @@ onBeforeUnmount(() => {
         <label
           >显示名<input v-model="customName" maxlength="60" required /></label
         ><label
-          >此Wiki站的英文页面标题<input
+          >萌娘百科页面标题（例如艾莲·乔）<input
             v-model="customWiki"
             maxlength="120"
             required
             placeholder="例如 Tin Master" /></label
-        ><button :disabled="busy">新增待导入角色</button>
+        ><IkActionButton :disabled="busy">新增待导入角色</IkActionButton>
       </form>
     </article>
     <article>
       <h2>任务进度与结果</h2>
+      <IkActionButton :disabled="busy" @click="deleteLog()"
+        >清空已结束日志</IkActionButton
+      >
       <p>
         每2.5秒自动刷新 · 排队
         {{ jobs.filter((j) => j.state === "queued").length }} · 处理
@@ -785,6 +884,20 @@ onBeforeUnmount(() => {
           >{{ roles.find((r) => r.id === j.roleId)?.name || j.roleId }} ·
           {{ kindNames[j.kind] || j.kind }} ·
           {{ stateNames[j.state] || j.state }}</b
+        >
+        <p v-if="j.progress">
+          {{ j.progress.completed }} / {{ j.progress.total }} · 当前
+          {{ j.progress.current }} · 已生成 {{ j.progress.generated }} · 失败
+          {{ j.progress.failed }}
+        </p>
+        <IkActionButton
+          v-if="['queued', 'running'].includes(j.state)"
+          :disabled="busy"
+          @click="cancelJob(j.id)"
+          >中断任务</IkActionButton
+        >
+        <IkActionButton v-else :disabled="busy" @click="deleteLog(j.id)"
+          >删除日志</IkActionButton
         >
         <pre v-if="j.result">{{ JSON.stringify(j.result, null, 2) }}</pre>
         <p v-if="j.error">{{ j.error }}</p>
@@ -830,7 +943,7 @@ onBeforeUnmount(() => {
   width: auto;
   display: inline;
 }
-.resident-admin button {
+.resident-admin button:not(.z-button) {
   padding: 9px 14px;
   border-radius: 18px;
   background: #d7fa00;

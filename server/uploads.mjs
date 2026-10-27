@@ -7,7 +7,7 @@ const types = {
   "image/gif": "gif",
 };
 const max = 30 * 1024 * 1024;
-export function createUploads(db, profiles) {
+export function createUploads(db, profiles, {premium} = {}) {
   // Public, deliberately published raster images only. Private chat uses its own member-only storage.
   db.exec(
     `CREATE TABLE IF NOT EXISTS image_uploads(id TEXT PRIMARY KEY,userId TEXT,data TEXT,bytes BLOB)`,
@@ -205,9 +205,19 @@ export function createUploads(db, profiles) {
         const b = await body(req);
         avatar = resolveImages([b.mediaId], u)[0];
       }
-      profiles.set(u.id, { avatarUrl: avatar?.url || "" });
-      reply({ avatar });
+      const apply=()=>profiles.set(u.id,{avatarUrl:avatar?.url||''});
+      const polychrome=avatar&&premium?premium.purchase(u.id,'avatar',avatar.id,apply):(apply(),profiles.get(u.id).polychrome);
+      reply({ avatar, polychrome });
       return true;
+    }
+    if(path==='/v1/me/card'&&req.method==='PUT'){
+      const u=auth(),b=await body(req),image=resolveImages([b.mediaId],u)[0];
+      const card={id:'upload-'+image.id,name:'自定义名片',kind:'city',image};
+      if(!premium)throw fail(503,'名片上传服务未配置');
+      const polychrome=premium.purchase(u.id,'card',image.id,()=>{
+        db.prepare('INSERT OR REPLACE INTO custom_cards VALUES(?,?,?)').run(card.id,u.id,JSON.stringify(card));
+        db.prepare('INSERT OR REPLACE INTO user_cosmetics VALUES(?,?)').run(u.id,card.id);
+      });reply({card,polychrome});return true;
     }
     return false;
   }

@@ -2029,10 +2029,18 @@ export function useApi() {
     invalidate(qk.me.avatars);
     invalidate(qk.me.self);
     invalidate(["profile"]);
-    if (typeof data.balance === "number") useAuthStore().updateUserPartial({ denny: data.balance });
+    if (typeof data.polychrome === "number") useAuthStore().updateUserPartial({ polychrome: data.polychrome });
     return { url: normalizeMediaUrl(avatar?.url) || uploaded.url };
   };
 
+  const uploadCustomCard = async(file:File):Promise<BusinessCard>=>{
+    const uploaded=await uploadImage(file);
+    const data=await $api<Rec>('/v1/me/card',{method:'PUT',body:{mediaId:uploaded.documentId}});
+    const card=toBusinessCard(data.card);if(!card)throw new Error('名片响应无效');
+    invalidate(['me','business-cards']);invalidate(['profile']);
+    if(typeof data.polychrome==='number')useAuthStore().updateUserPartial({polychrome:data.polychrome});
+    return card;
+  };
   // ── 个人资料设置 ───────────────────────────────────
 
   const getMyProfileRaw = () => $api<Rec>("/v1/me/profile");
@@ -2242,6 +2250,7 @@ export function useApi() {
   const getMyDenny = async (): Promise<{
     denny: number;
     dennyGiven: number;
+    polychrome: number;
     recentLogs: Array<{
       action: string;
       amount: number;
@@ -2256,6 +2265,7 @@ export function useApi() {
     ]);
     return {
       denny: Number(wallet.balance) || 0,
+      polychrome: Number(wallet.polychrome) || 0,
       dennyGiven: Number(wallet.given) || 0,
       recentLogs: logs.items.map((log) => ({
         action: String(log.action || ""),
@@ -2590,6 +2600,7 @@ export function useApi() {
     getMyAvatars,
     equipAvatar,
     uploadCustomAvatar,
+    uploadCustomCard,
     updateMyName,
     updateMyBio,
     updateMyVisibility,

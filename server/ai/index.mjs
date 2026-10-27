@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { wikiIdentity } from "./identity.mjs";
 import { randomUUID, randomInt, createHash } from "node:crypto";
 import { createProvider } from "./provider.mjs";
@@ -36,11 +37,62 @@ export function createResidentAI(
  CREATE INDEX IF NOT EXISTS ai_jobs_kind_date ON ai_jobs(kind,createdAt);
  CREATE INDEX IF NOT EXISTS ai_jobs_state ON ai_jobs(state);
  CREATE INDEX IF NOT EXISTS ai_messages_thread ON ai_messages(userId,roleId);`);
-  for (const r of roster)
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS ai_migrations(key TEXT PRIMARY KEY,value TEXT)",
+  );
+  if (
+    !db
+      .prepare("SELECT 1 FROM ai_migrations WHERE key='moegirl-catalog-v1'")
+      .get()
+  ) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const removed = db.prepare("SELECT count(*) n FROM ai_roles").get().n;
+      db.prepare("DELETE FROM ai_roles").run();
+      db.prepare(
+        "UPDATE ai_jobs SET state='cancelled',data=? WHERE state IN ('queued','running')",
+      ).run(
+        JSON.stringify({
+          error: "按站点升级要求强制清理旧Wiki目录并改用萌娘百科",
+        }),
+      );
+      db.prepare("INSERT INTO ai_migrations VALUES(?,?)").run(
+        "moegirl-catalog-v1",
+        JSON.stringify({ removed, at: new Date().toISOString() }),
+      );
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+  const jobContext = new AsyncLocalStorage(),
+    controllers = new Map();
+  const cancellable =
+    (fn) =>
+    (url, options = {}) => {
+      const signal = jobContext.getStore()?.signal;
+      signal?.throwIfAborted();
+      return fn(url, {
+        ...options,
+        ...(signal
+          ? {
+              signal: options.signal
+                ? AbortSignal.any([signal, options.signal])
+                : signal,
+            }
+          : {}),
+      });
+    };
+  fetcher = cancellable(fetcher);
+  wikiFetcher = cancellable(wikiFetcher);
+  for (const r of env.AI_SEED_CATALOG === "1" ? roster : [])
     db.prepare("INSERT OR IGNORE INTO ai_roles VALUES(?,?)").run(
       r.id,
       JSON.stringify({
         ...r,
+        wiki: r.name,
+        sourceProvider: "moegirl",
         enabled: false,
         approved: false,
         dossier: null,
@@ -87,6 +139,15 @@ export function createResidentAI(
       JSON.stringify({ error: deleting ? "角色已删除" : "Wiki资料已清空" }),
       r.id,
     );
+    for (const job of db
+      .prepare("SELECT id FROM ai_jobs WHERE roleId=? AND state='running'")
+      .all(r.id)) {
+      db.prepare("UPDATE ai_jobs SET state='cancelled',data=? WHERE id=?").run(
+        JSON.stringify({ error: "角色已删除或资料已清空" }),
+        job.id,
+      );
+      controllers.get(job.id)?.abort();
+    }
     audit(actor.id, deleting ? "ai.role.delete" : "ai.wiki.clear", r.id);
   }
   const list = () =>
@@ -147,6 +208,11 @@ export function createResidentAI(
   const userFor = (id) =>
     db.prepare("SELECT id,username FROM users WHERE id=?").get(id);
   function canRun(job) {
+    jobContext.getStore()?.signal.throwIfAborted();
+    const state = db
+      .prepare("SELECT state FROM ai_jobs WHERE id=?")
+      .get(job.id)?.state;
+    if (state === "cancelled") throw fail(409, "任务已中断");
     const u = userFor(job.userId);
     if (!u || admin.banned(u) || (job.kind !== "chat" && !admin.isAdmin(u)))
       throw fail(403, "任务权限已失效");
@@ -230,6 +296,7 @@ export function createResidentAI(
       state: row.state,
       createdAt: row.createdAt,
       result: d.result,
+      progress: d.progress,
       error: d.error,
     };
   }
@@ -238,6 +305,49 @@ export function createResidentAI(
   async function run(job) {
     const data = JSON.parse(job.data);
     canRun(job);
+    if (job.kind === "full-sync") {
+      const discovery = await run({ ...job, kind: "catalog" });
+      const targets = list(),
+        progress = {
+          total: targets.length,
+          completed: 0,
+          imported: 0,
+          generated: 0,
+          failed: 0,
+          current: "",
+        },
+        errors = [];
+      for (const r of targets) {
+        canRun(job);
+        progress.current = r.name;
+        db.prepare(
+          "UPDATE ai_jobs SET data=json_set(data,'$.progress',json(?)) WHERE id=? AND state='running'",
+        ).run(JSON.stringify(progress), job.id);
+        try {
+          await run({ ...job, kind: "wiki", roleId: r.id });
+          progress.imported++;
+          await run({ ...job, kind: "dossier", roleId: r.id });
+          progress.generated++;
+        } catch (e) {
+          canRun(job);
+          progress.failed++;
+          errors.push({
+            roleId: r.id,
+            name: r.name,
+            error: e.status ? e.message : "角色处理失败",
+          });
+        }
+        progress.completed++;
+      }
+      return {
+        ...progress,
+        current: "",
+        errors,
+        discoveryTruncated: discovery.truncated,
+        allGenerated:
+          !discovery.truncated && progress.generated === progress.total,
+      };
+    }
     if (job.kind === "connection") {
       const result = await provider.complete(
         [
@@ -257,7 +367,8 @@ export function createResidentAI(
     if (job.kind === "catalog") {
       const discovered = await discoverWikiCharacters({ fetcher: wikiFetcher });
       canRun(job);
-      let added = 0;
+      let added = 0,
+        limited = false;
       transaction(() => {
         for (const item of discovered.items) {
           const known = roster.find(
@@ -285,10 +396,14 @@ export function createResidentAI(
               })
           )
             continue;
-          if (list().length >= 2000) break;
+          if (list().length >= 2000) {
+            limited = true;
+            break;
+          }
           const id =
+            known?.id ||
             "wiki-" +
-            createHash("sha256").update(item.wiki).digest("hex").slice(0, 24);
+              createHash("sha256").update(item.wiki).digest("hex").slice(0, 24);
           db.prepare("INSERT OR IGNORE INTO ai_roles VALUES(?,?)").run(
             id,
             JSON.stringify({
@@ -307,7 +422,7 @@ export function createResidentAI(
         }
         audit(job.userId, "ai.catalog.discover", String(added));
       });
-      return { added, truncated: discovered.truncated };
+      return { added, truncated: discovered.truncated || limited };
     }
     if (job.kind === "avatar") {
       const r = get(job.roleId);
@@ -489,24 +604,28 @@ export function createResidentAI(
         if (!job) break;
         db.prepare("UPDATE ai_jobs SET state='running' WHERE id=?").run(job.id);
         try {
-          const result = await run(job);
-          db.prepare("UPDATE ai_jobs SET state='done',data=? WHERE id=?").run(
-            JSON.stringify({ result }),
-            job.id,
-          );
+          const controller = new AbortController();
+          controllers.set(job.id, controller);
+          const result = await jobContext.run(controller, () => run(job));
+          canRun(job);
+          db.prepare(
+            "UPDATE ai_jobs SET state='done',data=? WHERE id=? AND state='running'",
+          ).run(JSON.stringify({ result }), job.id);
         } catch (e) {
-          db.prepare("UPDATE ai_jobs SET state='failed',data=? WHERE id=?").run(
+          db.prepare(
+            "UPDATE ai_jobs SET state='failed',data=? WHERE id=? AND state='running' ",
+          ).run(
             JSON.stringify({
               error: e.status ? e.message : "AI任务失败，未保存输出",
             }),
             job.id,
           );
         }
-        send(
-          job.userId,
-          "ai.job.updated",
-          jobView(db.prepare("SELECT * FROM ai_jobs WHERE id=?").get(job.id)),
-        );
+        controllers.delete(job.id);
+        const latestJob = db
+          .prepare("SELECT * FROM ai_jobs WHERE id=?")
+          .get(job.id);
+        if (latestJob) send(job.userId, "ai.job.updated", jobView(latestJob));
       }
     } finally {
       running = false;
@@ -519,7 +638,16 @@ export function createResidentAI(
       b.clientId.length > 100
     )
       throw fail(400, "需要客户端任务标识");
-    if (["wiki", "dossier", "catalog", "connection", "avatar"].includes(kind)) {
+    if (
+      [
+        "wiki",
+        "dossier",
+        "catalog",
+        "connection",
+        "avatar",
+        "full-sync",
+      ].includes(kind)
+    ) {
       const pending = db
         .prepare(
           "SELECT * FROM ai_jobs WHERE kind=? AND roleId=? AND userId=? AND state IN ('queued','running') LIMIT 1",
@@ -877,6 +1005,56 @@ export function createResidentAI(
       reply({ items: list().map(({ sourceText, ...r }) => r) });
       return true;
     }
+    if (path === "/v1/admin/ai/full-sync" && method === "POST") {
+      const b = await body(req);
+      reply(
+        enqueue(actor, "full-sync", "catalog", {
+          ...b,
+          skipForeignNames: false,
+        }),
+        202,
+      );
+      return true;
+    }
+    const jobAction = path.match(
+      /^\/v1\/admin\/ai\/jobs\/([^/]+)(?:\/(cancel))?$/,
+    );
+    if (jobAction) {
+      const id = decodeURIComponent(jobAction[1]),
+        row = db
+          .prepare("SELECT * FROM ai_jobs WHERE id=? AND kind!='chat'")
+          .get(id);
+      if (!row) throw fail(404, "任务不存在");
+      if (method === "POST" && jobAction[2]) {
+        if (["queued", "running"].includes(row.state)) {
+          db.prepare(
+            "UPDATE ai_jobs SET state='cancelled',data=json_set(data,'$.error',?) WHERE id=?",
+          ).run("管理员已中断任务", id);
+          controllers.get(id)?.abort();
+          audit(actor.id, "ai.job.cancel", id);
+        }
+        reply({ ok: true });
+        return true;
+      }
+      if (method === "DELETE" && !jobAction[2]) {
+        if (["queued", "running"].includes(row.state))
+          throw fail(409, "请先中断任务再删除日志");
+        db.prepare("DELETE FROM ai_jobs WHERE id=?").run(id);
+        audit(actor.id, "ai.job.log.delete", id);
+        reply({ ok: true });
+        return true;
+      }
+    }
+    if (path === "/v1/admin/ai/jobs" && method === "DELETE") {
+      const result = db
+        .prepare(
+          "DELETE FROM ai_jobs WHERE kind!='chat' AND state NOT IN ('queued','running')",
+        )
+        .run();
+      audit(actor.id, "ai.job.logs.clear", String(result.changes));
+      reply({ removed: result.changes });
+      return true;
+    }
     if (path === "/v1/admin/ai/jobs" && method === "GET") {
       reply({
         items: db
@@ -988,21 +1166,20 @@ export function createResidentAI(
           typeof b.text !== "string" ||
           b.text.length < 800 ||
           b.text.length > 90000 ||
-          !["", "Lore", "Voice-Overs", "DMs"].includes(b.part ?? "Lore") ||
+          (b.part != null && b.part !== "") ||
           (b.revision != null &&
             (!Number.isSafeInteger(b.revision) || b.revision <= 0))
         )
           throw fail(400, "需要800–90000字Wiki原文、有效页面部分和修订号");
         const text = cleanWiki(b.text);
         if (text.length < 800) throw fail(400, "Wiki原文不足");
-        const page =
-          r.wiki + ((b.part ?? "Lore") ? "/" + (b.part ?? "Lore") : "");
+        const page = r.wiki;
         const source = {
-          url: `${wikiOrigin}/wiki/${encodeURIComponent(page).replace(/%2F/g, "/")}`,
+          url: `${wikiOrigin}/${encodeURIComponent(page).replace(/%2F/g, "/")}`,
           revision: b.revision || null,
           fetchedAt: new Date().toISOString(),
           sha256: createHash("sha256").update(text).digest("hex"),
-          licenseUrl: "https://www.fandom.com/licensing",
+          licenseUrl: "https://zh.moegirl.org.cn/Moegirl:版权信息",
           verification: "administrator-provided-not-fetched",
         };
         save({
