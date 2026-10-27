@@ -14,11 +14,15 @@ const entries = routes.map((route) => {
     /^\/v1\/auth\/(email-codes|login\/email-code|password\/reset)/.test(
       route,
     ) ||
-    /^\/v1\/me\/(email|delete-account)/.test(route)
+    /^\/v1\/me\/email/.test(route)
   ) {
-    status = "not-implemented";
+    status = "implemented-requires-smtp";
     note =
-      "邮箱验证码/密码重置/邮箱绑定/注销验证尚未接通，缺少真实邮件适配器及完整流程；不是仅填配置即可使用。";
+      "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。";
+  }
+  if (/^\/v1\/me\/delete-account/.test(route)) {
+    status = "not-implemented";
+    note = "账号注销核验与清理尚未实现；邮件验证码已接入不等于注销流程已完成。";
   }
   if (/^\/v1\/auth\/mihoyo/.test(route)) {
     status = "not-implemented";

@@ -138,3 +138,5 @@ cd web && npm run test:unit
 ## 全量补齐进度
 
 当前仍不是全部功能完成的发行版。主动排查台账见 [implementation-backlog](docs/implementation-backlog.md)，核心前端路径清单见 [api-contract-inventory](docs/api-contract-inventory.json)。静态路径存在不等于所有方法、入口与多端均验收通过。
+
+邮箱验证码注册/登录、绑定和密码重置现已接通真实SMTP；默认保持本地账户，发信配置与边界见 [邮箱账户说明](docs/email-auth.md)。

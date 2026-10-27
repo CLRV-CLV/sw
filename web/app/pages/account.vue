@@ -503,8 +503,8 @@ const confirmSetPassword = async () => {
     message.warning("请填写验证码和新密码");
     return;
   }
-  if (password.length < 6) {
-    message.warning("密码长度不能少于 6 位");
+  if (password.length < 10 || password.length > 200) {
+    message.warning("密码需10–200字符");
     return;
   }
   if (password !== confirm) {
@@ -520,8 +520,10 @@ const confirmSetPassword = async () => {
     await api.resetPassword(security.value!.email, code, password);
     const hadPassword = security.value?.hasPassword === true;
     setPasswordDone();
-    message.success(hadPassword ? "密码修改成功" : "密码设置成功");
+    auth.clearSession();
+    message.success(hadPassword ? "密码已修改，所有设备已退出，请重新登录" : "密码已设置，请重新登录");
     goBack();
+    useLoginDialog().open();
   } catch (err) {
     message.error(resolveErrorMessage(err, "设置密码失败"));
   } finally {
@@ -936,7 +938,7 @@ useHead({ title: "账号中心" });
                       <z-input
                         v-model="setPasswordInput"
                         type="password"
-                        placeholder="新密码（至少 6 位）"
+                        placeholder="新密码（10–200字符）"
                       />
                     </z-form-item>
                     <z-form-item label="确认密码">

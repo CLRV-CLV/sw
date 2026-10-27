@@ -79,7 +79,7 @@ export function validateVideos(videos) {
 }
 export function createCommunity(
   db,
-  { profiles, admin, publicUser, uploads, broadcast = () => {} },
+  { profiles, admin, publicUser, uploads, broadcast = () => {}, emailConfigured = () => false },
 ) {
   db.exec(`CREATE TABLE IF NOT EXISTS daily_actions(userId TEXT,day TEXT,action TEXT,exp INTEGER,PRIMARY KEY(userId,day,action));
  CREATE TABLE IF NOT EXISTS checkins(userId TEXT,day TEXT,streak INTEGER,createdAt TEXT,PRIMARY KEY(userId,day));
@@ -915,7 +915,7 @@ export function createCommunity(
         transfers: true,
         tasks: true,
         inAppNotifications: true,
-        emailVerification: false,
+        emailVerification: emailConfigured(),
         mihoyoQr: false,
         webRtc: false,
         redPackets: false,

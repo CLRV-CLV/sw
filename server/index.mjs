@@ -1,3 +1,4 @@
+import { createEmailAuth } from './email-auth.mjs';
 import { createActivity } from './activity.mjs';
 import { createCommunity, validateVideos } from './community.mjs';
 import { createUploads } from './uploads.mjs';
@@ -88,7 +89,15 @@ const broadcast = (t, d) => {
 };
 const connections = createConnections();
 const admin = createAdmin(db, { broadcast });
-const community=createCommunity(db,{profiles,admin,publicUser,uploads,broadcast});
+function issueSession(u,req,res){
+ const t=randomBytes(32).toString('hex');
+ db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(t,u.id,Date.now()+604800000);
+ db.prepare('INSERT OR REPLACE INTO session_info VALUES(?,?,?,?)').run(t,String(req.headers['user-agent']||'').slice(0,500),req.socket.remoteAddress||'',new Date().toISOString());
+ res.setHeader('Set-Cookie',`ik_session=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${process.env.SECURE_COOKIE==='1'?'; Secure':''}`);
+ return {token:t,user:{...publicUser(u),email:emailAuth.emailOf(u.id),denny:profiles.get(u.id).denny,polychrome:profiles.get(u.id).polychrome}};
+}
+const emailAuth=createEmailAuth(db,{admin,publicUser,profiles,dataDir:dir,issueSession});
+const community=createCommunity(db,{profiles,admin,publicUser,uploads,broadcast,emailConfigured:()=>emailAuth.configured});
 const sessionUser = token => {
   const session=token&&db.prepare('SELECT userId FROM sessions WHERE token=? AND expires>?').get(token,Date.now());
   const u=session&&db.prepare('SELECT id,username FROM users WHERE id=?').get(session.userId);return u&&!admin.banned(u)?u:null;
@@ -168,6 +177,7 @@ const app = http.createServer(async (req, res) => {
       if (admin.banned(user)) throw fail(403, "账号已被封禁");
       return user;
     };
+    if (await emailAuth.handler({path,req,res,auth,body,reply})) return;
     if (await uploads.handler({path,req,url,auth,body,reply,res})) return;
     if (await residentAI.handler({path,req,url,auth,body,reply})) return;
     if (await activity.handler({path,req,url,auth,body,reply})) return;
@@ -193,12 +203,13 @@ const app = http.createServer(async (req, res) => {
     if (path === "/v1/auth/register" && req.method === "POST") {
       if (!admin.settings().registrationOpen) throw fail(403, "注册暂时关闭");
       const b = await body(req);
+      if (b.email !== undefined) { const u=emailAuth.register(b); return reply(issueSession(u,req,res),201); }
       if (
         typeof b.username !== "string" ||
         b.username.trim().length < 2 ||
         b.username.length > 40 ||
         typeof b.password !== "string" ||
-        b.password.length < 10
+        (b.password.length < 10 || b.password.length > 200)
       )
         throw fail(400, "用户名需2–40字，密码至少10字");
       const salt = randomBytes(16).toString("hex");
@@ -225,12 +236,11 @@ const app = http.createServer(async (req, res) => {
     }
     if (path === "/v1/auth/login" && req.method === "POST") {
       const b = await body(req);
-      const u = db
-        .prepare("SELECT * FROM users WHERE username=?")
-        .get(String(b.username || b.account || ""));
+      const identifier=String(b.username||b.account||b.identifier||'').trim();
+      const u=(identifier.includes('@')?emailAuth.ownerOf(identifier.toLowerCase()):null)||db.prepare('SELECT * FROM users WHERE username=?').get(identifier);
       if (
         !u ||
-        typeof b.password !== "string" ||
+        typeof b.password !== "string" || b.password.length>200 ||
         !timingSafeEqual(
           Buffer.from(u.password, "hex"),
           scryptSync(b.password, u.salt, 64),
@@ -238,18 +248,7 @@ const app = http.createServer(async (req, res) => {
       )
         throw fail(401, "用户名或密码错误");
       if (admin.banned(u)) throw fail(403, "账号已被封禁");
-      const t = randomBytes(32).toString("hex");
-      db.prepare("INSERT INTO sessions VALUES (?,?,?)").run(
-        t,
-        u.id,
-        Date.now() + 604800000,
-      );
-      db.prepare('INSERT OR REPLACE INTO session_info VALUES(?,?,?,?)').run(t,String(req.headers['user-agent']||'').slice(0,500),req.socket.remoteAddress||'',new Date().toISOString());
-      res.setHeader(
-        "Set-Cookie",
-        `ik_session=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${process.env.SECURE_COOKIE === "1" ? "; Secure" : ""}`,
-      );
-      return reply({ token: t, user: {...publicUser(u),denny:profiles.get(u.id).denny,polychrome:profiles.get(u.id).polychrome} });
+      return reply(issueSession(u,req,res));
     }
     if (path === "/v1/auth/logout" && req.method === "POST") {
       db.prepare("DELETE FROM sessions WHERE token=?").run(token || "");
@@ -259,7 +258,7 @@ const app = http.createServer(async (req, res) => {
       );
       return reply({ ok: true });
     }
-    if (path === "/v1/me") {const u=auth(),p=profiles.get(u.id);return reply({...publicUser(u),denny:p.denny,polychrome:p.polychrome});}
+    if (path === "/v1/me") {const u=auth(),p=profiles.get(u.id);return reply({...publicUser(u),email:emailAuth.emailOf(u.id),denny:p.denny,polychrome:p.polychrome});}
     if (path === "/v1/categories") return reply(SEED_CATEGORIES);
     if (path === "/v1/me/profile") {
       auth();

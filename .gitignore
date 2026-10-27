@@ -16,3 +16,6 @@ backups/
 
 # Server-side New API credential encryption key (back up privately).
 .ai-config-key
+
+# Server-side email OTP HMAC key; keep privately with database backups.
+.email-code-key
