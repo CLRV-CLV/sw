@@ -27,7 +27,8 @@ function fixture(env = {}) {
     calls = [],
     events = [];
   let answer = "嗯，下班想和朋友们休息一会儿，糖果我会带着。",
-    forceGate = true;
+    forceGate = true,
+    connectionOk = true;
   async function fetcher(url, options) {
     calls.push({
       url: String(url),
@@ -37,7 +38,8 @@ function fixture(env = {}) {
     const b = JSON.parse(options.body),
       sys = b.messages[0].content;
     let out;
-    if (sys.includes("审查器")) out = { allowed: forceGate };
+    if (sys.includes("连接测试")) out = { ok: connectionOk };
+    else if (sys.includes("审查器")) out = { allowed: forceGate };
     else if (sys.includes("恰好8个字符串")) out = dossier;
     else if (sys.includes("撰写本站绳网文章"))
       out = {
@@ -131,6 +133,7 @@ function fixture(env = {}) {
     ai,
     setAnswer: (a) => (answer = a),
     setGate: (v) => (forceGate = v),
+    setConnection: (v) => (connectionOk = v),
     close() {
       ai.close();
       db.close();
@@ -541,6 +544,101 @@ test("manual Wiki fallback is admin-only, explicitly labelled, resets activation
       r.sources[0].verification,
       "administrator-provided-not-fetched",
     );
+  } finally {
+    f.close();
+  }
+});
+
+test("admin connection test reports actual protocol success; multilingual duplicates and deletion are persistent", async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    await assert.rejects(
+      f.call("alice", "/v1/admin/ai/test", "POST", { clientId: "denied" }),
+      { status: 403 },
+    );
+    const connection = await f.wait(
+      await f.call("admin", "/v1/admin/ai/test", "POST", {
+        clientId: "test-connection",
+      }),
+    );
+    assert.equal(connection.state, "done");
+    assert.equal(connection.result.ok, true);
+    assert.match(connection.result.message, /连接成功/);
+    f.setConnection(false);
+    const failure = await f.wait(
+      await f.call("admin", "/v1/admin/ai/test", "POST", {
+        clientId: "bad-protocol",
+      }),
+    );
+    assert.equal(failure.state, "failed");
+    assert.match(failure.error, /JSON协议测试/);
+    f.setConnection(true);
+    await assert.rejects(
+      f.call("admin", "/v1/admin/ai/roles", "POST", {
+        name: "艾莲",
+        wiki: "艾莲·乔",
+      }),
+      { status: 409 },
+    );
+    const duplicate = {
+      id: "duplicate-ellen",
+      name: "艾莲（中文）",
+      wiki: "艾莲·乔",
+      kind: "resident",
+      enabled: false,
+      approved: false,
+      dossier: null,
+      sources: [],
+      sourceStatus: "pending",
+      version: 1,
+    };
+    f.db
+      .prepare("INSERT INTO ai_roles VALUES(?,?)")
+      .run(duplicate.id, JSON.stringify(duplicate));
+    const dedupe = await f.call("admin", "/v1/admin/ai/dedupe", "POST");
+    assert.ok(dedupe.removed.includes(duplicate.id));
+    assert.equal(
+      (await f.call("admin", "/v1/admin/ai/roles")).items.some(
+        (r) => r.id === duplicate.id,
+      ),
+      false,
+    );
+    await f.call("admin", "/v1/admin/ai/roles/ellen-joe/wiki", "DELETE");
+    const cleared = (await f.call("admin", "/v1/admin/ai/roles")).items.find(
+      (r) => r.id === "ellen-joe",
+    );
+    assert.equal(cleared.enabled, false);
+    assert.equal(cleared.dossier, null);
+    assert.deepEqual(cleared.sources, []);
+    await f.call("admin", "/v1/admin/ai/roles/ellen-joe", "DELETE");
+    await assert.rejects(f.call("alice", "/v1/ai/chats/ellen-joe"), {
+      status: 404,
+    });
+    assert.equal(
+      (await f.call("alice", "/v1/ai/roles")).items.some(
+        (r) => r.id === "ellen-joe",
+      ),
+      false,
+    );
+    assert.match(f.ai.author("ai:ellen-joe").username, /AI/);
+    f.ai.close();
+    const restarted = createResidentAI(f.db, {
+      admin: createAdmin(f.db, { env: { ADMIN_USERNAMES: "admin" } }),
+      dataDir: f.dir,
+    });
+    try {
+      assert.equal(
+        JSON.parse(
+          f.db.prepare("SELECT data FROM ai_roles WHERE id='ellen-joe'").get()
+            .data,
+        ).deleted,
+        true,
+      );
+      assert.match(restarted.author("ai:ellen-joe").username, /AI/);
+    } finally {
+      restarted.close();
+    }
   } finally {
     f.close();
   }

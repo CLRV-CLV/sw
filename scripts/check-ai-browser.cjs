@@ -21,7 +21,8 @@ const fs = require("node:fs"),
     assert.ok(!JSON.stringify(b.messages).includes(key));
     const sys = b.messages[0].content;
     let result;
-    if (sys.includes("审查器"))
+    if (sys.includes("连接测试")) result = { ok: true };
+    else if (sys.includes("审查器"))
       result = { allowed: !b.messages.at(-1).content.includes("编程") };
     else if (sys.includes("撰写本站绳网文章"))
       result = {
@@ -173,6 +174,14 @@ const fs = require("node:fs"),
     );
     console.log("PASS browser New API configuration and secret non-echo");
     await admin
+      .getByRole("button", { name: "测试已保存配置的连接", exact: true })
+      .click();
+    await admin
+      .locator(".connection-result[data-state=done]")
+      .waitFor({ timeout: 15000 });
+    console.log("PASS connection test auto-updates to verified success");
+
+    await admin
       .locator(".resident-admin select")
       .first()
       .selectOption("ellen-joe");
@@ -252,6 +261,43 @@ const fs = require("node:fs"),
       false,
     );
     console.log("PASS mobile AI admin and chat no horizontal overflow");
+    await admin
+      .locator(".resident-admin select")
+      .first()
+      .selectOption("billy-kid");
+    admin.once("dialog", (d) => d.accept());
+    await admin
+      .getByRole("button", { name: "删除此角色", exact: true })
+      .click();
+    await admin.waitForFunction(
+      () =>
+        !document.querySelector(
+          '.resident-admin select option[value="billy-kid"]',
+        ),
+    );
+    console.log("PASS role deletion updates UI and keeps it out of list");
+    await admin.setViewportSize({ width: 1440, height: 1000 });
+    await admin.goto(base + "/create");
+    await admin.locator(".commission-masthead h1").waitFor();
+    assert.equal(
+      await admin.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    await admin.screenshot({ path: "/tmp/sw-commission-desktop.png" });
+    await admin.setViewportSize({ width: 390, height: 844 });
+    await admin.locator(".ik-create-mobile").waitFor();
+    assert.equal(
+      await admin.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    await admin.screenshot({ path: "/tmp/sw-commission-mobile.png" });
+    console.log(
+      "PASS desktop and mobile commission workspace runtime, no horizontal overflow",
+    );
   } catch (e) {
     console.error(e);
     process.exitCode = 1;

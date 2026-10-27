@@ -1,3 +1,4 @@
+import { wikiIdentity } from "./identity.mjs";
 import { createHash } from "node:crypto";
 export const wikiOrigin = "https://zenless-zone-zero.fandom.com";
 const fail = (msg) => Object.assign(new Error(msg), { status: 502 });
@@ -81,6 +82,8 @@ export async function fetchWiki(role, { fetcher = fetch } = {}) {
     if (!data.parse?.text?.["*"]) continue;
     const cleaned = cleanWiki(data.parse.text["*"]);
     if (cleaned.length < 200) continue;
+    const hash = createHash("sha256").update(cleaned).digest("hex");
+    if (sources.some((s) => s.sha256 === hash)) continue;
     sources.push({
       url: `${wikiOrigin}/wiki/${encodeURIComponent(page).replace(/%2F/g, "/")}`,
       revision: data.parse.revid || null,
@@ -169,7 +172,8 @@ export async function discoverWikiCharacters({ fetcher = fetch } = {}) {
           ].includes(title)
         )
           continue;
-        found.set(title, { wiki: title, name: title, kind });
+        const key = wikiIdentity(title);
+        if (!found.has(key)) found.set(key, { wiki: title, name: title, kind });
       }
       continuation = d.continue?.cmcontinue || "";
       if (!continuation) break;

@@ -21,7 +21,13 @@ interface Job {
   roleId: string;
   state: string;
   error?: string;
-  result?: { postId?: string };
+  result?: {
+    postId?: string;
+    message?: string;
+    added?: number;
+    removed?: string[];
+    [key: string]: unknown;
+  };
 }
 const config = ref({
     enabled: false,
@@ -47,6 +53,85 @@ const sourceText = ref(""),
 const manualText = ref(""),
   manualPart = ref("Lore"),
   manualRevision = ref<number | undefined>();
+const connectionJob = ref(""),
+  connectionStarted = ref(0),
+  pollingError = ref("");
+const stateNames: Record<string, string> = {
+  queued: "排队中",
+  running: "处理中",
+  done: "成功",
+  failed: "失败",
+};
+const kindNames: Record<string, string> = {
+  wiki: "Wiki导入",
+  dossier: "档案生成",
+  catalog: "角色发现",
+  article: "文章写作",
+  connection: "连接测试",
+};
+const connection = computed(() =>
+  jobs.value.find((j) => j.id === connectionJob.value),
+);
+async function testConnection() {
+  await act(async () => {
+    const j = await $fetch<Job>("/v1/admin/ai/test", {
+      method: "POST",
+      body: { clientId: crypto.randomUUID() },
+    });
+    connectionJob.value = j.id;
+    connectionStarted.value = Date.now();
+    notice.value = "正在测试已保存配置；测试会实际调用模型并消耗少量额度。";
+  });
+}
+async function removeRole(wikiOnly = false) {
+  if (
+    !current.value ||
+    !confirm(
+      wikiOnly
+        ? "清空此角色的Wiki原文、来源及档案，并停用角色？"
+        : "删除此角色？已有帖子与聊天记录不会抹除；已删除目录项不会在重启/自动发现时重新出现。",
+    )
+  )
+    return;
+  await act(async () => {
+    await $fetch(
+      `/v1/admin/ai/roles/${selected.value}${wikiOnly ? "/wiki" : ""}`,
+      { method: "DELETE" },
+    );
+    if (!wikiOnly) selected.value = "";
+    sourceText.value = "";
+    dossierText.value = "{}";
+    notice.value = wikiOnly ? "Wiki资料已清空，角色已停用" : "角色已删除";
+  });
+}
+async function dedupe() {
+  await act(async () => {
+    const r = await $fetch<{ removed: string[]; conflicts: string[] }>(
+      "/v1/admin/ai/dedupe",
+      { method: "POST" },
+    );
+    notice.value = `已清理${r.removed.length}个未使用重复目录项；${r.conflicts.length}个已启用/有历史的重复项保留，请人工处理。`;
+  });
+}
+let pollTimer: ReturnType<typeof setInterval> | undefined,
+  polling = false;
+async function pollJobs() {
+  if (polling) return;
+  polling = true;
+  try {
+    const [j, r] = await Promise.all([
+      $fetch<{ items: Job[] }>("/v1/admin/ai/jobs"),
+      $fetch<{ items: Role[] }>("/v1/admin/ai/roles"),
+    ]);
+    jobs.value = j.items;
+    roles.value = r.items;
+    pollingError.value = "";
+  } catch (e) {
+    pollingError.value = detail(e);
+  } finally {
+    polling = false;
+  }
+}
 async function manualImport() {
   await act(async () => {
     await $fetch(`/v1/admin/ai/roles/${selected.value}/wiki-text`, {
@@ -126,7 +211,7 @@ async function task(kind: "wiki" | "dossier") {
       method: "POST",
       body: { clientId: crypto.randomUUID() },
     });
-    notice.value = "任务已加入队列，请刷新查看完成状态。";
+    notice.value = "任务已加入队列，下方会自动刷新进度和成功/失败结果。";
   });
 }
 async function patch(body: object) {
@@ -215,7 +300,13 @@ watch(selected, () => {
   editName.value = current.value?.name || "";
   dossierText.value = JSON.stringify(current.value?.dossier || {}, null, 2);
 });
-onMounted(load);
+onMounted(() => {
+  load();
+  pollTimer = setInterval(pollJobs, 2500);
+});
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer);
+});
 </script>
 <template>
   <div class="resident-admin">
@@ -224,6 +315,7 @@ onMounted(load);
     <button :disabled="busy" @click="load">刷新AI任务与资料</button>
     <article>
       <h2>New API 配置</h2>
+      <p v-if="pollingError" role="alert">自动刷新失败：{{ pollingError }}</p>
       <p>
         使用OpenAI兼容的 /v1/chat/completions，模型需支持JSON输出。Base
         URL填写网关根地址或以 /v1 结尾的地址。API
@@ -255,9 +347,27 @@ onMounted(load);
             maxlength="512" /></label
         ><button :disabled="busy">保存New API配置</button>
       </form>
+      <button :disabled="busy" @click="testConnection">
+        测试已保存配置的连接
+      </button>
+      <p
+        v-if="connection"
+        class="connection-result"
+        :data-state="connection.state"
+        role="status"
+      >
+        <b>连接测试：{{ stateNames[connection.state] || connection.state }}</b
+        ><span v-if="connection.state === 'done'">
+          · {{ connection.result?.message }}</span
+        ><span v-if="connection.error"> · {{ connection.error }}</span
+        ><small>
+          · {{ new Date(connectionStarted).toLocaleTimeString() }} 发起</small
+        >
+      </p>
     </article>
     <article>
       <h2>驻站角色资料与审核</h2>
+      <button :disabled="busy" @click="dedupe">清理不同语言的重复目录项</button>
       <p>
         流程：导入Wiki → 生成详细档案 → 核对来源与档案 → 审核 →
         启用。未核实角色不会自动上线。Wiki/模型内容是不可信资料，不赋予执行权限。防套话是多层防护，不承诺绝对防逆向。
@@ -277,6 +387,11 @@ onMounted(load);
       >
       <template v-if="current"
         ><h3>{{ current.name }} · {{ current.wiki }}</h3>
+        <button class="danger" :disabled="busy" @click="removeRole(true)">
+          清空Wiki资料</button
+        ><button class="danger" :disabled="busy" @click="removeRole(false)">
+          删除此角色
+        </button>
         <label>显示名<input v-model="editName" maxlength="60" /></label
         ><label
           >Wiki页面标题（修正后需要重新导入/生成/审核）<input
@@ -409,12 +524,23 @@ onMounted(load);
       </form>
     </article>
     <article>
-      <h2>最近任务（不包含用户私聊）</h2>
+      <h2>任务进度与结果</h2>
+      <p>
+        每2.5秒自动刷新 · 排队
+        {{ jobs.filter((j) => j.state === "queued").length }} · 处理
+        {{ jobs.filter((j) => j.state === "running").length }} · 成功
+        {{ jobs.filter((j) => j.state === "done").length }} · 失败
+        {{
+          jobs.filter((j) => j.state === "failed").length
+        }}。仅展示最近100个管理任务，不包含用户私聊。
+      </p>
       <div v-for="j in jobs" :key="j.id" class="job">
         <b
           >{{ roles.find((r) => r.id === j.roleId)?.name || j.roleId }} ·
-          {{ j.kind }} · {{ j.state }}</b
+          {{ kindNames[j.kind] || j.kind }} ·
+          {{ stateNames[j.state] || j.state }}</b
         >
+        <pre v-if="j.result">{{ JSON.stringify(j.result, null, 2) }}</pre>
         <p v-if="j.error">{{ j.error }}</p>
         <p v-if="j.result?.postId">草稿ID：{{ j.result.postId }}</p>
       </div>
@@ -480,6 +606,25 @@ onMounted(load);
 .job {
   border-bottom: 1px solid #414836;
   padding: 12px 0;
+}
+.connection-result {
+  padding: 16px;
+  border: 1px solid #6c735a;
+  border-radius: 12px;
+}
+.connection-result[data-state="done"] {
+  border-color: #d7fa00;
+  color: #d7fa00;
+}
+.connection-result[data-state="failed"] {
+  border-color: #ff987c;
+  color: #ffba9e;
+}
+.resident-admin .danger {
+  background: #ffd1bb;
+}
+.job {
+  overflow-wrap: anywhere;
 }
 [role="alert"] {
   color: #ffba9e;

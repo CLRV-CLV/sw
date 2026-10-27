@@ -1,3 +1,4 @@
+import { wikiIdentity } from "./identity.mjs";
 import { randomUUID, randomInt, createHash } from "node:crypto";
 import { createProvider } from "./provider.mjs";
 import {
@@ -60,7 +61,9 @@ export function createResidentAI(
   const get = (id) => {
     const row = db.prepare("SELECT data FROM ai_roles WHERE id=?").get(id);
     if (!row) throw fail(404, "角色不存在");
-    return JSON.parse(row.data);
+    const role = JSON.parse(row.data);
+    if (role.deleted) throw fail(404, "角色已删除");
+    return role;
   };
   const save = (r) =>
     db
@@ -70,7 +73,8 @@ export function createResidentAI(
     db
       .prepare("SELECT json_remove(data,'$.sourceText') data FROM ai_roles")
       .all()
-      .map((r) => JSON.parse(r.data));
+      .map((r) => JSON.parse(r.data))
+      .filter((r) => !r.deleted);
   const configured = () => {
     const c = provider.view();
     return !!(c.enabled && c.hasApiKey && c.baseUrl && c.model);
@@ -198,6 +202,22 @@ export function createResidentAI(
   async function run(job) {
     const data = JSON.parse(job.data);
     canRun(job);
+    if (job.kind === "connection") {
+      const result = await provider.complete(
+        [
+          {
+            role: "system",
+            content: '连接测试。仅返回JSON {"ok":true}，不输出其他内容。',
+          },
+          { role: "user", content: "test" },
+        ],
+        { maxTokens: 64 },
+      );
+      if (result?.ok !== true)
+        throw fail(502, "网关已响应，但模型未通过JSON协议测试");
+      canRun(job);
+      return { ok: true, message: "连接成功：认证、模型调用与JSON输出均通过" };
+    }
     if (job.kind === "catalog") {
       const discovered = await discoverWikiCharacters({ fetcher: wikiFetcher });
       canRun(job);
@@ -205,11 +225,19 @@ export function createResidentAI(
       transaction(() => {
         for (const item of discovered.items) {
           if (
-            list().some(
-              (r) =>
-                r.wiki.toLowerCase().replace(/_/g, " ") ===
-                item.wiki.toLowerCase().replace(/_/g, " "),
-            )
+            list().some((r) => wikiIdentity(r.wiki) === wikiIdentity(item.wiki))
+          )
+            continue;
+          if (
+            db
+              .prepare("SELECT data FROM ai_roles")
+              .all()
+              .some((row) => {
+                const r = JSON.parse(row.data);
+                return (
+                  r.deleted && wikiIdentity(r.wiki) === wikiIdentity(item.wiki)
+                );
+              })
           )
             continue;
           if (list().length >= 2000) break;
@@ -422,6 +450,14 @@ export function createResidentAI(
       b.clientId.length > 100
     )
       throw fail(400, "需要客户端任务标识");
+    if (["wiki", "dossier", "catalog", "connection"].includes(kind)) {
+      const pending = db
+        .prepare(
+          "SELECT * FROM ai_jobs WHERE kind=? AND roleId=? AND userId=? AND state IN ('queued','running') LIMIT 1",
+        )
+        .get(kind, rid, actor.id);
+      if (pending) return jobView(pending);
+    }
     const old = db
       .prepare("SELECT * FROM ai_jobs WHERE userId=? AND clientId=?")
       .get(actor.id, b.clientId);
@@ -558,6 +594,62 @@ export function createResidentAI(
         return true;
       }
     }
+    if (path === "/v1/admin/ai/test" && method === "POST") {
+      const b = await body(req);
+      reply(enqueue(actor, "connection", "connection", b), 202);
+      return true;
+    }
+    if (path === "/v1/admin/ai/dedupe" && method === "POST") {
+      const groups = new Map(),
+        removed = [],
+        conflicts = [];
+      for (const r of list()) {
+        const key = wikiIdentity(r.wiki);
+        if (!groups.has(key)) {
+          groups.set(key, r);
+          continue;
+        }
+        const other = groups.get(key);
+        let drop = r,
+          keep = other;
+        if ((r.approved || r.enabled) && !other.approved && !other.enabled) {
+          drop = other;
+          keep = r;
+        }
+        const used =
+          db
+            .prepare("SELECT 1 FROM ai_messages WHERE roleId=? LIMIT 1")
+            .get(drop.id) ||
+          db
+            .prepare(
+              "SELECT 1 FROM posts WHERE json_extract(data,'$.authorId')=? LIMIT 1",
+            )
+            .get("ai:" + drop.id);
+        if (drop.approved || drop.enabled || used) {
+          conflicts.push(drop.id);
+          continue;
+        }
+        save({
+          ...drop,
+          deleted: true,
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [],
+          sourceText: "",
+          version: drop.version + 1,
+        });
+        groups.set(key, keep);
+        removed.push(drop.id);
+      }
+      audit(
+        actor.id,
+        "ai.roles.dedupe",
+        JSON.stringify({ removed, conflicts }),
+      );
+      reply({ removed, conflicts });
+      return true;
+    }
     if (path === "/v1/admin/ai/config") {
       if (method === "GET") {
         reply(provider.view());
@@ -663,6 +755,14 @@ export function createResidentAI(
         b.name.length > 60
       )
         throw fail(400, "无效角色名称或Wiki页面标题");
+      if (
+        list().some(
+          (r) =>
+            wikiIdentity(r.wiki) === wikiIdentity(b.wiki) ||
+            wikiIdentity(r.name) === wikiIdentity(b.name),
+        )
+      )
+        throw fail(409, "此角色已经存在（含不同语言别名）");
       const id =
         "custom-" +
         createHash("sha256").update(b.wiki).digest("hex").slice(0, 24);
@@ -708,6 +808,29 @@ export function createResidentAI(
     if (manage) {
       const rid = decodeURIComponent(manage[1]),
         r = get(rid);
+      if (method === "DELETE" && (!manage[2] || manage[2] === "wiki")) {
+        const deleting = !manage[2];
+        save({
+          ...r,
+          ...(deleting ? { deleted: true } : {}),
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [],
+          sourceText: "",
+          sourceStatus: "pending",
+          version: r.version + 1,
+        });
+        db.prepare(
+          "UPDATE ai_jobs SET state='failed',data=? WHERE roleId=? AND state='queued'",
+        ).run(
+          JSON.stringify({ error: deleting ? "角色已删除" : "Wiki资料已清空" }),
+          rid,
+        );
+        audit(actor.id, deleting ? "ai.role.delete" : "ai.wiki.clear", rid);
+        reply({ ok: true });
+        return true;
+      }
       if (method === "PUT" && manage[2] === "wiki-text") {
         const b = await body(req);
         if (
@@ -856,7 +979,11 @@ export function createResidentAI(
     author(id) {
       if (!id?.startsWith("ai:")) return null;
       try {
-        const r = get(id.slice(3));
+        const row = db
+          .prepare("SELECT data FROM ai_roles WHERE id=?")
+          .get(id.slice(3));
+        if (!row) return null;
+        const r = JSON.parse(row.data);
         return { id, username: `${r.name}（AI）` };
       } catch {
         return null;

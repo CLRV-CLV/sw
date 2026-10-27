@@ -1230,10 +1230,11 @@ if (import.meta.client) {
       </div>
     </Transition>
 
+    <header class="commission-masthead"><div><span class="commission-eyebrow">INTER-KNOT / COMMISSION DESK · 02</span><h1>把委托，交给绳网<span>。</span></h1><p>情报、故事与街头的新消息，从这里发出。</p></div><div class="commission-stamp"><b>信号已接通 ↗</b><span>{{ isSavingDraft ? '草稿保存中…' : hasUnsavedChanges ? '有未保存的修改' : '准备好你的下一条消息' }}</span></div></header>
     <!-- ── Two-Column Body ─────────────────────── -->
     <div class="ik-create-columns">
       <!-- ── Left: Editing Slot + Drafts (ZMenu) ── -->
-      <aside class="ik-create-nav-wrap">
+      <aside class="ik-create-nav-wrap"><div class="commission-sidebar-label"><span>01 / WORKSPACE</span><b>我的草稿箱</b><small>未发布的想法，先留在这里。</small></div>
         <z-menu
           class="ik-create-menu"
           :model-value="activeMenuKey"
@@ -1282,7 +1283,7 @@ if (import.meta.client) {
       </aside>
 
       <!-- ── Right: Form Panel ───────────────── -->
-      <main class="ik-create-panel">
+      <main class="ik-create-panel"><div class="commission-editor-heading"><span>02 / COMPOSE</span><b>{{ isEditingPublished ? '编辑已发布委托' : '编写一条新委托' }}</b><small>MARKDOWN / RICH TEXT</small></div>
         <div class="ik-create-panel__body">
           <!-- ═══ 写作区：标题 + 正文（主内容，无装饰头部） ═══ -->
           <!-- Title field — flat TextField with bottom divider (Flutter desktop style) -->
@@ -4102,5 +4103,322 @@ if (import.meta.client) {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Shared lime street-poster language; retain the existing editor and draft actions. */
+.ik-create-page {
+  height: calc(100dvh - 92px);
+  gap: 18px;
+  padding-top: 18px;
+}
+.commission-masthead {
+  position: relative;
+  isolation: isolate;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 25px 32px;
+  background: #d7fa00;
+  color: #12170b;
+  border-radius: 24px 0 24px 24px;
+  overflow: hidden;
+  border: 3px solid #090c06;
+}
+.commission-masthead:after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: 15%;
+  top: -70%;
+  width: 180px;
+  height: 300%;
+  transform: rotate(28deg);
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 12px,
+    #161d0b0c 12px 14px
+  );
+}
+.commission-eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+.commission-masthead h1 {
+  font-size: clamp(26px, 3.3vw, 48px);
+  line-height: 1.1;
+  margin: 12px 0 8px;
+  font-weight: 950;
+  letter-spacing: -2px;
+}
+.commission-masthead h1 span {
+  color: #fff;
+}
+.commission-masthead p {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0;
+}
+.commission-stamp {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: right;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.commission-stamp b {
+  background: #151b0e;
+  color: #d7fa00;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 15px;
+}
+.commission-stamp span {
+  font-size: 11px;
+}
+.ik-create-columns {
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 20px;
+}
+.ik-create-nav-wrap {
+  background: #1d201a;
+  border: 2px solid #373d30;
+  border-radius: 22px 0 22px 22px;
+  overflow: hidden;
+  padding: 12px;
+}
+.commission-sidebar-label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 8px 19px;
+  border-bottom: 1px solid #3f4636;
+  margin-bottom: 8px;
+}
+.commission-sidebar-label span,
+.commission-editor-heading > span {
+  color: #d7fa00;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+.commission-sidebar-label b {
+  color: #f1f4e9;
+  font-size: 22px;
+}
+.commission-sidebar-label small {
+  color: #979f8c;
+  font-size: 11px;
+}
+.ik-create-menu :deep(.z-menu__item) {
+  border-radius: 12px !important;
+  margin: 6px 0;
+  border: 1px solid #3b4134;
+  background: #24291f;
+}
+.ik-create-menu :deep(.z-menu__item.is-active) {
+  background: #d7fa00 !important;
+  color: #151c0b !important;
+}
+.ik-create-menu :deep(.z-menu__item.is-active) .ik-nav-item__title,
+.ik-create-menu :deep(.z-menu__item.is-active) .ik-nav-item__meta {
+  color: #151c0b;
+}
+.ik-create-panel {
+  background: #20241c;
+  border: 2px solid #3e4536;
+  padding: 0;
+  border-radius: 22px 0 22px 22px;
+}
+.commission-editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 17px 24px;
+  border-bottom: 1px solid #3e4536;
+  background: #22271d;
+  flex-shrink: 0;
+}
+.commission-editor-heading b {
+  color: #f1f4e9;
+  font-size: 16px;
+}
+.commission-editor-heading small {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #949d86;
+}
+.ik-create-panel__body {
+  border: 0;
+  border-radius: 0;
+  background: #191c16;
+  padding: 24px 28px;
+}
+.ik-create-section--title {
+  border-bottom: 1px solid #465038;
+  padding-bottom: 16px;
+}
+.ik-create-title-input :deep(.z-textarea__inner) {
+  font-size: 28px !important;
+  font-weight: 800 !important;
+  line-height: 1.4 !important;
+  color: #edf1e5 !important;
+}
+.ik-create-editor-frame {
+  border: 1px solid #3d4731;
+  border-radius: 14px;
+  background: #141710;
+  overflow: hidden;
+}
+.ik-create-config__divider-text {
+  color: #d7fa00;
+}
+.ik-create-field__label {
+  color: #ced5c0;
+}
+.ik-create-footer {
+  width: 100%;
+  background: #1b2016;
+  border: 2px solid #3a432e;
+  border-radius: 18px 0 18px 18px;
+}
+.ik-create-footer__inner {
+  width: calc(100% - 32px);
+  min-height: 66px;
+}
+@media (max-width: 768px) {
+  .ik-create-page {
+    height: auto;
+    margin: 0 auto;
+    min-height: calc(100dvh - 80px);
+    width: calc(100% - 20px);
+    gap: 12px;
+    padding-top: 10px;
+    padding-bottom: 90px;
+  }
+  .commission-masthead {
+    padding: 20px 18px;
+    border-radius: 18px 0 18px 18px;
+    gap: 12px;
+  }
+  .commission-masthead h1 {
+    font-size: 27px;
+    letter-spacing: -1px;
+  }
+  .commission-eyebrow {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+  .commission-masthead p {
+    font-size: 11px;
+  }
+  .commission-stamp {
+    display: none;
+  }
+  .commission-editor-heading {
+    padding: 13px 16px;
+    gap: 12px;
+  }
+  .commission-editor-heading small {
+    display: none;
+  }
+  .ik-create-columns {
+    display: block;
+    flex: initial;
+  }
+  .ik-create-nav-wrap {
+    display: none;
+  }
+  .ik-create-panel__body {
+    padding: 18px 14px;
+  }
+  .ik-create-title-input :deep(.z-textarea__inner) {
+    font-size: 23px !important;
+  }
+  .ik-create-footer {
+    display: none;
+  }
+}
+@media (max-width: 768px) {
+  .ik-create-mobile {
+    background: #191e14;
+    border: 2px solid #3c4730;
+    border-radius: 18px 0 18px 18px;
+    min-height: initial;
+  }
+  .ik-mobile-title-input {
+    font-size: 25px;
+    color: #edf1e5;
+    background: transparent;
+    font-weight: 800;
+  }
+  .ik-mobile-body-input {
+    background: transparent;
+    color: #d4ddc7;
+  }
+  .ik-mobile-row {
+    background: #20271a;
+    color: #d4ddc7;
+    border-bottom: 1px solid #3a452e;
+  }
+  .ik-mobile-row__icon {
+    color: #d7fa00;
+  }
+  .ik-mobile-cover-add {
+    background: #222c17;
+    border-color: #687d43;
+  }
+  .ik-mobile-footer {
+    background: #181f11;
+    border-top: 2px solid #3e4b2c;
+  }
+  .ik-mobile-footer__publish {
+    background: #d7fa00;
+    color: #161d0c;
+  }
+}
+.ik-create-menu.z-menu {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: none;
+}
+.ik-create-menu.z-menu::after {
+  display: none;
+}
+.ik-create-menu :deep(.z-menu__prefix),
+.ik-create-menu :deep(.z-menu__suffix) {
+  display: none;
+}
+.ik-create-menu :deep(.z-menu__scrollbar) {
+  margin: 0;
+  outline: 0;
+  border-radius: 0;
+}
+.ik-create-menu :deep(.z-menu__content) {
+  padding: 0;
+}
+.ik-create-menu :deep(.z-menu__item) {
+  border-radius: 10px 0 10px 10px;
+  margin-bottom: 9px;
+  border: 1px solid #4b5738;
+  background: #252d1c;
+}
+.ik-create-menu :deep(.z-menu__item::after) {
+  display: none;
+}
+.ik-create-menu :deep(.z-menu__item.is-active) {
+  animation: none;
+  background: #d7fa00;
+  color: #151b0e;
+  border-color: #d7fa00;
+}
+.ik-create-panel :deep(.post-body-editor__source) {
+  font-family: "InterKnot Sans", sans-serif;
 }
 </style>
