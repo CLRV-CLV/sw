@@ -1,14 +1,16 @@
+import { createProfiles, validateProfile, safeImage } from './site-data.mjs';
 import { randomUUID } from 'node:crypto';
 export function createAdmin(db, { env = process.env, broadcast = () => {} } = {}) {
   db.exec(`CREATE TABLE IF NOT EXISTS user_access(userId TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'user', banned INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS site_settings(key TEXT PRIMARY KEY,value TEXT);
     CREATE TABLE IF NOT EXISTS admin_audit(id TEXT PRIMARY KEY,actor TEXT,action TEXT,target TEXT,createdAt TEXT);`);
+  const profiles = createProfiles(db);
   const fail = (status, message) => Object.assign(new Error(message), { status });
   const bootstrap = () => new Set((env.ADMIN_USERNAMES || '').split(',').map(s => s.trim()).filter(Boolean));
   const access = u => db.prepare('SELECT * FROM user_access WHERE userId=?').get(u.id) || { role: 'user', banned: 0 };
   const isAdmin = u => Boolean(u && (bootstrap().has(u.username) || access(u).role === 'admin'));
   const banned = u => Boolean(u && access(u).banned);
-  const settings = () => ({ registrationOpen: true, postingOpen: true, ...Object.fromEntries(db.prepare('SELECT * FROM site_settings').all().map(r => [r.key, JSON.parse(r.value)])) });
+  const settings = () => ({ registrationOpen: true, postingOpen: true, siteTitle: "绳网", siteIcon: "/icon/favicon-32x32.png", siteBackground: "", backgroundColor: "#121212", ...Object.fromEntries(db.prepare('SELECT * FROM site_settings').all().map(r => [r.key, JSON.parse(r.value)])) });
   function audit(actor, action, target) { db.prepare('INSERT INTO admin_audit VALUES(?,?,?,?,?)').run(randomUUID(), actor, action, target, new Date().toISOString()); }
   function transaction(fn) { db.exec('BEGIN'); try { const result = fn(); db.exec('COMMIT'); return result; } catch (e) { db.exec('ROLLBACK'); throw e; } }
   const handler = async ({ path, req, url, auth, body, reply }) => {
@@ -24,21 +26,28 @@ export function createAdmin(db, { env = process.env, broadcast = () => {} } = {}
     if (path === '/v1/admin/audit' && method === 'GET') { reply(list('admin_audit')); return true; }
     if (path === '/v1/admin/settings' && method === 'PATCH') {
       const b = await body(req);
-      if (Object.keys(b).some(k => !['registrationOpen','postingOpen'].includes(k)) || Object.values(b).some(v => typeof v !== 'boolean')) throw fail(400, '设置仅接受注册/发帖开关');
+      if (Object.entries(b).some(([k,v]) => {
+        if (['registrationOpen','postingOpen'].includes(k)) return typeof v!=='boolean';
+        if (k==='siteTitle') return typeof v!=='string'||!v.trim()||v.length>80;
+        if (['siteIcon','siteBackground'].includes(k)) return !safeImage(v);
+        if (k==='backgroundColor') return typeof v!=='string'||!/^#[0-9a-f]{6}$/i.test(v);
+        return true;
+      })) throw fail(400,'无效站点设置');
       transaction(() => { for (const [key, value] of Object.entries(b)) db.prepare('INSERT OR REPLACE INTO site_settings VALUES(?,?)').run(key,JSON.stringify(value)); audit(actor.id,'settings.update',JSON.stringify(b)); }); reply(settings()); return true;
     }
     if (path === '/v1/admin/users' && method === 'GET') {
       // Never SELECT password/salt into the response, even for administrators.
       const rows = db.prepare('SELECT id,username FROM users ORDER BY rowid DESC LIMIT ? OFFSET ?').all(limit, offset);
-      reply({ items: rows.map(u => ({ ...u, role: isAdmin(u) ? 'admin' : 'user', banned: banned(u), sessions: db.prepare('SELECT count(*) n FROM sessions WHERE userId=? AND expires>?').get(u.id,Date.now()).n })), total: db.prepare('SELECT count(*) n FROM users').get().n, page }); return true;
+      reply({ items: rows.map(u => ({ ...u, ...profiles.get(u.id), role: isAdmin(u) ? 'admin' : 'user', banned: banned(u), sessions: db.prepare('SELECT count(*) n FROM sessions WHERE userId=? AND expires>?').get(u.id,Date.now()).n })), total: db.prepare('SELECT count(*) n FROM users').get().n, page }); return true;
     }
     if (/^\/v1\/admin\/users\/[^/]+$/.test(path) && method === 'PATCH') {
       const target = db.prepare('SELECT id,username FROM users WHERE id=?').get(id); if (!target) throw fail(404,'用户不存在');
       const b = await body(req);
-      if (Object.keys(b).some(k => !['role','banned'].includes(k)) || (b.role !== undefined && !['user','admin'].includes(b.role)) || (b.banned !== undefined && typeof b.banned !== 'boolean')) throw fail(400,'无效用户权限');
+      const profilePatch = Object.fromEntries(Object.entries(b).filter(([k])=>!['role','banned'].includes(k)));
+      if (!validateProfile(profilePatch) || Object.keys(b).some(k => !['role','banned','nickname','bio','avatarUrl','level','exp','denny','polychrome','hidden'].includes(k)) || (b.role !== undefined && !['user','admin'].includes(b.role)) || (b.banned !== undefined && typeof b.banned !== 'boolean')) throw fail(400,'无效用户权限');
       if ((b.banned || b.role === 'user') && target.id === actor.id) throw fail(400,'不能封禁自己或移除自己的管理员权限');
       if ((b.banned || b.role === 'user') && bootstrap().has(target.username)) throw fail(400,'部署指定的管理员必须由部署者修改环境配置');
-      transaction(() => { const old = access(target); db.prepare('INSERT OR REPLACE INTO user_access VALUES(?,?,?)').run(id,b.role ?? old.role,b.banned === undefined ? Number(old.banned) : Number(b.banned)); if (b.banned) db.prepare('DELETE FROM sessions WHERE userId=?').run(id); audit(actor.id,'user.update',id); }); reply({ ok:true }); return true;
+      transaction(() => { const old = access(target); db.prepare('INSERT OR REPLACE INTO user_access VALUES(?,?,?)').run(id,b.role ?? old.role,b.banned === undefined ? Number(old.banned) : Number(b.banned)); if (b.banned) db.prepare('DELETE FROM sessions WHERE userId=?').run(id); profiles.set(id,profilePatch); audit(actor.id,'user.update',JSON.stringify({id,changes:b})); }); reply({ ok:true }); return true;
     }
     if (/^\/v1\/admin\/users\/[^/]+\/sessions$/.test(path) && method === 'DELETE') {
       transaction(() => { db.prepare('DELETE FROM sessions WHERE userId=?').run(id); audit(actor.id,'sessions.revoke',id); }); reply({ok:true}); return true;

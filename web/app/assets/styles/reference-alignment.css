@@ -207,3 +207,5 @@ body #__nuxt .ik-mobile-nav__item:not(.is-active):is(:hover,:focus-visible)::bef
 /* The button itself is a transparent hit area, including active/hover states.
    No legacy selected rectangle may show beneath the rounded-slant pseudo plate. */
 body .ik-home-container .ik-home-nav-hub .ik-stream-tab:is([data-state=active],[aria-selected=true]){background:transparent;border:0;box-shadow:none}
+/* Administrator-selected canvas; empty image retains the terminal dot texture. */
+body #__nuxt .ik-page{background-color:var(--site-bg-color,#121212);background-image:var(--site-bg-image,none),radial-gradient(#ffffff09 .8px,transparent .8px);background-size:cover,5px 5px;background-position:center;background-attachment:fixed}

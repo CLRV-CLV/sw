@@ -127,7 +127,7 @@ const overlayOpen = computed(
     <NuxtPage />
   </div>
   <div v-else>
-    <IkZzzMarquee class="ik-global-marquee" :paused="overlayOpen" />
+    <IkZzzMarquee v-if="route.path !== '/admin'" class="ik-global-marquee" :paused="overlayOpen" />
     <!-- backdrop-filter 合成层预热：1×1 不可见元素，让 GPU 在首屏就把
          模糊着色器编译好、合成层分配好。否则用户第一次打开弹窗再关闭时，
          合成层首次创建/销毁会多吃 1~3 帧 paint，表现为出场动画期间弹窗
@@ -136,11 +136,11 @@ const overlayOpen = computed(
       <div aria-hidden="true" class="ik-backdrop-warmup"></div>
     </ClientOnly>
 
-    <AppHeader />
+    <AppHeader v-if="route.path !== '/admin'" />
     <main class="ik-page">
       <NuxtPage />
     </main>
-    <MobileBottomNav v-if="showMobileBottomNav" />
+    <MobileBottomNav v-if="showMobileBottomNav && route.path !== '/admin'" />
 
     <!-- 登录弹窗 -->
     <ClientOnly>

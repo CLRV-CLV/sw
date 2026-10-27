@@ -1110,6 +1110,7 @@ onBeforeUnmount(() => {
       </div>
     </Transition>
 
+    <HomeAccountTools />
     <div class="ik-terminal-masthead">
       <div class="ik-terminal-masthead__copy">
         <div class="ik-terminal-masthead__eyebrow"><span class="ik-terminal-dot" /> 新艾利都 · 民间情报网络 <span>NO. 001 / PUBLIC ACCESS</span></div>

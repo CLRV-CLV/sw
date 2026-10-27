@@ -122,3 +122,9 @@ cd web && npm run test:unit
 本项目是 Vue/Nuxt/TypeScript 前端 + Node.js JavaScript 后端 + SQLite。宝塔选择 **Node.js 项目**，Node **22.16+**（建议22.22+），运行目录 `server`，启动命令 `npm start`。首次部署、Nginx/WebSocket、管理员与数据保留更新详见 [宝塔部署指南](docs/baota-deployment.md)。
 
 更新：`./update.sh` 默认来源为 `arena/fd457726-sw`，`./update.sh main` 指定分支。更新前在线备份SQLite与.env，拒绝覆盖本地改动；宝塔自带进程管理时构建后需在面板重启，或使用独立PM2自动重启（二者二选一）。
+
+### 本站资料、外观和敲敲
+
+管理员首页提供后台入口。后台拥有独立管理导航，支持站点标题/图标URL/背景图/颜色，以及用户昵称/简介/头像URL/等级/经验/丁尼/菲林设置。个人空间已接通真实注册账号。普通用户的菲林仅标为珍贵货币。
+
+`/messages`接入真实一对一私聊、SQLite消息持久化、引用/编辑/撤回、已读/未读、置顶/免打扰，以及成员隔离的WebSocket事件。原敲敲弹窗的私聊接口也使用这一后端。**群聊、语音视频、文件消息和真实AI仍未完成**，详见[敲敲实装范围](docs/messenger.md)。

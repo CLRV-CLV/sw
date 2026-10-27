@@ -5,6 +5,9 @@ const { visible, close } = useLoginDialog();
 const auth = useAuthStore();
 const { $api } = useNuxtApp();
 const message = useMessage();
+const scrollLock=useBodyScrollLock(),lockToken=Symbol('local-login');
+watch(visible, open => { if(open)scrollLock.acquire(lockToken);else scrollLock.release(lockToken); },{immediate:true});
+onBeforeUnmount(() => scrollLock.release(lockToken));
 const username = ref("");
 const password = ref("");
 const register = ref(false);
@@ -31,7 +34,7 @@ const submit = async () => {
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="local-auth-overlay" @click.self="!busy && close()">
+    <div v-if="visible" class="local-auth-overlay">
       <section class="local-auth" role="dialog" aria-modal="true" aria-labelledby="local-auth-title" @keydown.esc="!busy && close()">
         <header><span>INTER-KNOT // 独立账户</span><button aria-label="关闭" :disabled="busy" @click="close">×</button></header>
         <div class="local-auth-ticket" aria-hidden="true"><span>PROXY ACCESS</span><b>IK / 01</b><i /></div>

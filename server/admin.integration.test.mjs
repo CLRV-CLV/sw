@@ -30,6 +30,19 @@ test('admin HTTP permissions, settings, ban and deletion persistence across rest
     const [,users]=await call('/v1/admin/users','GET',undefined,owner.token);
     assert.equal(users.items.find(u=>u.username==='owner').role,'admin');
     const memberId=users.items.find(u=>u.username==='member').id;
+    assert.equal((await call('/v1/me','GET',undefined,owner.token))[1].role,'admin');
+    assert.equal((await call(`/v1/admin/users/${memberId}`,'PATCH',{nickname:'安比测试',bio:'这里是简介',avatarUrl:'/images/default-avatar.webp',level:25,exp:120,denny:3000,polychrome:160},owner.token))[0],200);
+    const [,profile]=await call(`/v1/users/${memberId}`,'GET',undefined,member.token);
+    assert.equal((await call(`/v1/users/${memberId}`))[1].polychrome,undefined);
+    assert.equal(profile.isSelf,true);assert.equal(profile.nickname,'安比测试');assert.equal(profile.level,25);
+    assert.equal((await call(`/v1/users/${memberId}/posts`))[0],200);
+    assert.equal((await call('/v1/me/wallet','GET',undefined,member.token))[1].polychrome,160);
+    assert.equal((await call(`/v1/admin/users/${memberId}`,'PATCH',{polychrome:-1},owner.token))[0],400);
+    assert.equal((await call('/v1/me/profile','PATCH',{polychrome:999},member.token))[0],400);
+    assert.equal((await call('/v1/admin/settings','PATCH',{siteTitle:'新艾利都',siteIcon:'/icon/favicon-32x32.png',siteBackground:'https://example.test/bg.webp',backgroundColor:'#151515'},owner.token))[0],200);
+    assert.equal((await call('/v1/site'))[1].siteTitle,'新艾利都');
+    assert.equal((await call('/v1/admin/settings','PATCH',{siteIcon:'javascript:alert(1)'},owner.token))[0],400);
+
     assert.equal((await call(`/v1/admin/users/${memberId}`,'PATCH',{banned:true},owner.token))[0],200);
     assert.equal((await call('/v1/me','GET',undefined,member.token))[0],401);
     assert.equal((await call('/v1/auth/login','POST',{username:'member',password:'a-long-test-password'}))[0],403);
@@ -42,7 +55,7 @@ test('admin HTTP permissions, settings, ban and deletion persistence across rest
     await stop();await start();
     const [,restarted]=await call('/v1/admin/overview','GET',undefined,owner.token);
     assert.equal(restarted.counts.posts,after.counts.posts);
-    assert.equal(restarted.settings.registrationOpen,false);
+    assert.equal(restarted.settings.registrationOpen,false);assert.equal(restarted.settings.siteTitle,'新艾利都');assert.equal((await call(`/v1/users/${memberId}`))[1].level,25);
     assert.equal((await call(`/v1/posts/${id}`))[0],404);
     assert.ok((await call('/v1/admin/audit','GET',undefined,owner.token))[1].total>=3);
   } finally {await stop();rmSync(data,{recursive:true,force:true});}

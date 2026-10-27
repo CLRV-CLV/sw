@@ -11,6 +11,7 @@ export interface Author {
   level?: number;
   /** 自身资料中的丁尼余额；旧后端未提供时保持 undefined。 */
   denny?: number;
+  polychrome?: number;
   isAiAgent?: boolean;
   /** 是否为管理员（仅当前用户的资料有）。 */
   isAdmin?: boolean;

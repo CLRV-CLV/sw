@@ -1,3 +1,5 @@
+import { createMessenger } from './messenger.mjs';
+import { createProfiles, validateProfile } from './site-data.mjs';
 import { createAdmin } from './admin.mjs';
 import { createConnections } from './connections.mjs';
 import { renderAvatarSvg, renderCoverSvg } from './art.mjs';
@@ -51,13 +53,17 @@ db.exec("COMMIT");
 }
 db.prepare("INSERT OR IGNORE INTO app_meta VALUES('demo_initialized','1')").run();
 const insert = db.prepare("INSERT OR IGNORE INTO posts VALUES (?,?)");
+const profiles = createProfiles(db);
 const publicUser = (u) => ({
   id: u.id,
-  name: u.username,
+  name: profiles.get(u.id).nickname || u.username,
+  nickname: profiles.get(u.id).nickname,
+  bio: profiles.get(u.id).bio,
+  role: admin.isAdmin(u) ? "admin" : "user",
   username: u.username,
-  level: u.level || 1,
+  level: profiles.get(u.id).level,
   examPassed: true,
-  avatarUrl: ["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`,
+  avatarUrl: profiles.get(u.id).avatarUrl || (["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`),
 });
 const fail = (status, detail) => Object.assign(new Error(detail), { status });
 async function body(req) {
@@ -79,6 +85,11 @@ const broadcast = (t, d) => {
 };
 const connections = createConnections();
 const admin = createAdmin(db, { broadcast });
+const sessionUser = token => {
+  const session=token&&db.prepare('SELECT userId FROM sessions WHERE token=? AND expires>?').get(token,Date.now());
+  const u=session&&db.prepare('SELECT id,username FROM users WHERE id=?').get(session.userId);return u&&!admin.banned(u)?u:null;
+};
+const messenger=createMessenger(db,{publicUser,banned:admin.banned,send(uid,t,d){for(const ws of sockets.clients)if(ws.readyState===1&&sessionUser(ws.sessionToken)?.id===uid)ws.send(JSON.stringify({op:'event',t,d}));}});
 const app = http.createServer(async (req, res) => {
   const reply = (data, status = 200) => {
     res.writeHead(status, {
@@ -153,7 +164,9 @@ const app = http.createServer(async (req, res) => {
       return user;
     };
     if (await admin.handler({ path, req, url, auth, body, reply })) return;
+    if (await messenger.handler({ path, req, url, auth, body, reply })) return;
     if (await connections({ path, req, res, url, auth, reply })) return;
+    if (path === '/v1/site' && req.method === 'GET') { const {siteTitle,siteIcon,siteBackground,backgroundColor}=admin.settings();return reply({siteTitle,siteIcon,siteBackground,backgroundColor}); }
     if (path === "/health") return reply({ ok: true });
     if (/^\/media\/(avatar|cover)\/[\w-]+\.svg$/.test(path)) {
       const [, , kind, file] = path.split("/");
@@ -240,15 +253,25 @@ const app = http.createServer(async (req, res) => {
     if (path === "/v1/categories") return reply(SEED_CATEGORIES);
     if (path === "/v1/me/profile") {
       auth();
-      return reply({ avatar: { url: publicUser(user).avatarUrl } });
+      if (req.method === 'PATCH') { const patch=await body(req); if(Object.keys(patch).some(k=>!['bio','hidden'].includes(k))||!validateProfile(patch))throw fail(400,'无效个人资料');profiles.set(user.id,patch); }
+      return reply({ ...profiles.get(user.id), avatar: { url: publicUser(user).avatarUrl } });
     }
     if (path === "/v1/me/exp") {
       auth();
-      return reply({ level: 1, exp: 0 });
+      return reply({ level: profiles.get(user.id).level, exp: profiles.get(user.id).exp });
     }
     if (path === "/v1/me/wallet") {
       auth();
-      return reply({ balance: 0 });
+      return reply({ balance: profiles.get(user.id).denny, polychrome: profiles.get(user.id).polychrome });
+    }
+    const profileMatch=path.match(/^\/v1\/users\/([^/]+)$/);
+    if(profileMatch && req.method==='GET') {
+      const id=decodeURIComponent(profileMatch[1]);const target=db.prepare('SELECT id,username FROM users WHERE id=?').get(id)||SEED_USERS.find(u=>u.id===id);
+      if(!target)throw fail(404,'用户不存在');const p=profiles.get(id),me=publicUser(target),self=user?.id===id;
+      if(p.hidden&&!self&&!admin.isAdmin(user))return reply({id,username:me.name,isHidden:true,isSelf:false});
+      const posts=db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft');
+      const {denny,polychrome,...publicProfile}=p;
+      return reply({...me,username:me.name,login:target.username,avatar:{url:me.avatarUrl},...publicProfile,...(self||admin.isAdmin(user)?{denny,polychrome}:{}),isSelf:self,isHidden:p.hidden,stats:{postCount:posts.length,commentCount:db.prepare("SELECT count(*) n FROM comments WHERE json_extract(data,'$.authorId')=?").get(id).n,totalViews:posts.reduce((sum,p)=>sum+(p.viewCount||0),0)}});
     }
     const reactionCount = (id, kind) =>
       Number(
@@ -422,6 +445,11 @@ const app = http.createServer(async (req, res) => {
         ? p.coverSlug === "cover-cunning-hares" ? {url: "/images/zzz.webp", width:1921, height:1537} : { url: `/media/cover/${p.coverSlug}.svg`, width: 800, height: ZZZ_COVERS[p.coverSlug]?.h || 508 }
         : null,
     });
+    const userPosts=path.match(/^\/v1\/users\/([^/]+)\/posts$/);
+    if(userPosts && req.method==='GET') {
+      const id=decodeURIComponent(userPosts[1]);if(profiles.get(id).hidden&&user?.id!==id&&!admin.isAdmin(user))throw fail(403,'个人空间未公开');
+      return reply({items:db.prepare('SELECT data FROM posts').all().map(r=>JSON.parse(r.data)).filter(p=>p.authorId===id&&p.status!=='draft').map(toPost),nextCursor:null});
+    }
     if (
       (path === "/v1/posts" ||
         ["/v1/feed/hot", "/v1/feed/unread"].includes(path) ||
@@ -621,11 +649,13 @@ app.on("upgrade", (req, socket, head) => {
     }
   }
   sockets.handleUpgrade(req, socket, head, (ws) => {
-    ws.send(JSON.stringify({ op: "hello", d: { userId: null } }));
+    ws.sessionToken=req.headers.authorization?.replace(/^Bearer /,'')||req.headers.cookie?.match(/(?:^|; )ik_session=([^;]+)/)?.[1];
+    ws.send(JSON.stringify({ op: "hello", d: { userId: sessionUser(ws.sessionToken)?.id||null } }));
     ws.on("message", (data) => {
       try {
         const f = JSON.parse(data);
-        if (["ping", "subscribe", "unsubscribe"].includes(f.op))
+        if(f.op==='typing'){const u=sessionUser(ws.sessionToken);if(!u)throw Error('login');messenger.typing(String(f.d?.conversationId||''),u.id);}
+        else if (["ping", "subscribe", "unsubscribe"].includes(f.op))
           ws.send(JSON.stringify({ op: "ack", seq: f.seq }));
         else
           ws.send(JSON.stringify({ op: "error", d: { code: "UNSUPPORTED" } }));
