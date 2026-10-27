@@ -1,0 +1,469 @@
+{
+  "scope": "useApi.ts路径级静态盘点；不覆盖所有旧敲敲调用，也不是端到端测试报告",
+  "generatedBy": "node scripts/audit-api-contracts.mjs",
+  "total": 77,
+  "entries": [
+    {
+      "route": "/v1/auth/email-codes",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-requires-smtp",
+      "note": "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。"
+    },
+    {
+      "route": "/v1/auth/login",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/auth/login/email-code",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-requires-smtp",
+      "note": "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。"
+    },
+    {
+      "route": "/v1/auth/mihoyo/qr",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-implemented",
+      "note": "米游社扫码认证适配器未实现，需要合法平台流程和实测；不伪造扫码成功。"
+    },
+    {
+      "route": "/v1/auth/mihoyo/qr/poll",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-implemented",
+      "note": "米游社扫码认证适配器未实现，需要合法平台流程和实测；不伪造扫码成功。"
+    },
+    {
+      "route": "/v1/auth/password/reset",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-requires-smtp",
+      "note": "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。"
+    },
+    {
+      "route": "/v1/auth/register",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/benefits",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/categories",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/comments/${encodeURIComponent(commentId)}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/comments/${encodeURIComponent(commentId)}/${flag}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/comments/${encodeURIComponent(commentId)}/replies",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/comments/${encodeURIComponent(targetId)}/like",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/exam",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/exam/attempts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-enabled",
+      "note": "本站当前不要求入站考试，GET /v1/exam 明确返回 required:false；没有伪造试卷和考试记录。"
+    },
+    {
+      "route": "/v1/exam/attempts/${encodeURIComponent(attemptId)}/submit",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-enabled",
+      "note": "本站当前不要求入站考试，GET /v1/exam 明确返回 required:false；没有伪造试卷和考试记录。"
+    },
+    {
+      "route": "/v1/exam/review",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-enabled",
+      "note": "本站当前不要求入站考试，GET /v1/exam 明确返回 required:false；没有伪造试卷和考试记录。"
+    },
+    {
+      "route": "/v1/feed/following",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/feed/hot",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/feed/unread",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/avatar",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/avatars",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/avatars/equipped",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/blocks",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/cards",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/cards/equipped",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/check-in",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/delete-account",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-implemented",
+      "note": "账号注销核验与清理尚未实现；邮件验证码已接入不等于注销流程已完成。"
+    },
+    {
+      "route": "/v1/me/delete-account/code",
+      "source": "web/app/composables/useApi.ts",
+      "status": "not-implemented",
+      "note": "账号注销核验与清理尚未实现；邮件验证码已接入不等于注销流程已完成。"
+    },
+    {
+      "route": "/v1/me/denny-logs",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/email",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-requires-smtp",
+      "note": "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。"
+    },
+    {
+      "route": "/v1/me/email/code",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-requires-smtp",
+      "note": "真实SMTP适配器、验证码注册/登录/重置及邮箱绑定已接入；有本地SMTP与HTTP/浏览器测试，生产投递尚需配置服务商并实测。未配置返回503；不支持直接换绑。"
+    },
+    {
+      "route": "/v1/me/exp",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/favorites",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/mihoyo",
+      "source": "web/app/composables/useApi.ts",
+      "status": "capability-status-only",
+      "note": "只报告当前未配置/未绑定；不表示具备绑定、同步、解绑全流程。"
+    },
+    {
+      "route": "/v1/me/posts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/profile",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/profile/pin-candidates",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/profile/pinned-posts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/reads",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/relations",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/security",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/sessions",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/sessions/${encodeURIComponent(id)}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/sessions/revoke-others",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/uploads",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/uploads/${encodeURIComponent(id)}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/username",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/me/wallet",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(articleId)}/denny",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(articleId)}/favorite",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(articleId)}/related",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(articleId)}/triple",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}/draft",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}/edit",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}/pin",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}/publish",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(id)}/views",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(postId)}/comments",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/posts/${encodeURIComponent(targetId)}/like",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/reports",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/reports/check",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/search/posts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/search/suggest",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/tags/suggest",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/uploads/${encodeURIComponent(payload.uploadToken)}/complete",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/uploads/sign",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/${encodeURIComponent(userId)}",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/${encodeURIComponent(userId)}/block",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/${encodeURIComponent(userId)}/comments",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/${encodeURIComponent(userId)}/follow",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/${encodeURIComponent(userId)}/posts",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/users/mention-candidates",
+      "source": "web/app/composables/useApi.ts",
+      "status": "implemented-path-needs-method-level-verification",
+      "note": "路径已接入；不代表此路径所有方法或所有界面动作均已验证。"
+    },
+    {
+      "route": "/v1/videos/resolve",
+      "source": "web/app/composables/useApi.ts",
+      "status": "partial",
+      "note": "校验B站官方链接并生成播放器地址，不抓取元数据，不承诺原站播放权限；抖音等平台未实现。"
+    }
+  ]
+}

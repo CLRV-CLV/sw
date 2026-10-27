@@ -1,0 +1,628 @@
+:root {
+  color-scheme: dark;
+
+  --ik-bg: #0a0a0a;
+  --ik-bg-elevated: #1a1a1a;
+  --ik-bg-card: #222222;
+  --ik-text: #e8e8e8;
+  --ik-muted: #9a9a9a;
+  --ik-primary: #BFFF09;
+  --ik-accent: #00e5ff;
+  --ik-danger: #ff4d4f;
+
+  /* ── Cursor assets ─────────────────────────── */
+  --ik-cursor-default: url("/cursors/正常选择.png") 2 1, auto;
+  --ik-cursor-help: url("/cursors/帮助选择.png") 0 0, help;
+  --ik-cursor-not-allowed: url("/cursors/不可用.png") 16 14, not-allowed;
+  --ik-cursor-row-resize: url("/cursors/垂直调整大小.png") 16 16, row-resize;
+  --ik-cursor-progress: url("/cursors/后台加载.png") 2 1, progress;
+  --ik-cursor-cell: url("/cursors/候选.png") 16 4, cell;
+  --ik-cursor-crosshair: url("/cursors/精确选择.png") 16 16, crosshair;
+  --ik-cursor-pointer: url("/cursors/链接选择.png") 14 3, pointer;
+  --ik-cursor-wait: url("/cursors/忙.png") 2 1, wait;
+  --ik-cursor-pen: url("/cursors/手写.png") 1 1, text;
+  --ik-cursor-col-resize: url("/cursors/水平调整大小.png") 16 16, col-resize;
+  --ik-cursor-text: url("/cursors/文本选择.png") 16 16, text;
+  --ik-cursor-nwse-resize: url("/cursors/沿对角线调整大小1.png") 16 16, nwse-resize;
+  --ik-cursor-nesw-resize: url("/cursors/沿对角线调整大小2.png") 16 16, nesw-resize;
+  --ik-cursor-move: url("/cursors/移动.png") 16 16, move;
+
+  /* ── Card – structure ───────────────────────── */
+  --ik-post-card-radius: 24px 24px 0 24px;
+  --ik-post-card-inner-radius: 20px 20px 0 20px;
+  --ik-post-card-padding: 4px;
+  --ik-post-card-body-gap: 8px;
+  --ik-post-card-body-padding: 0 8px 12px;
+
+  /* ── Card – colors ──────────────────────────── */
+  --ik-post-card-outer-bg: #000;
+  --ik-post-card-inner-bg: #222;
+  --ik-post-card-cover-bg: #151515;
+  --ik-post-card-placeholder-bg: #2a2a2a;
+  --ik-post-card-divider-bg: #3a3a3a;
+  --ik-post-card-updated-bg: var(--ik-primary);
+  --ik-post-card-hover-bg: var(--ik-primary);
+
+  /* ── Card – cover ───────────────────────────── */
+  --ik-post-card-cover-aspect-ratio: 1.576;
+
+  /* ── Card – views overlay ───────────────────── */
+  --ik-post-card-views-font-size: 14px;
+  --ik-post-card-views-icon-size: 22px;
+
+  /* ── Card – avatar ──────────────────────────── */
+  --ik-post-card-avatar-size: 54px;
+  --ik-post-card-avatar-padding: 2px;
+  --ik-post-card-avatar-offset: -28px;
+  --ik-post-card-avatar-bg: #1b1b1b;
+
+  /* ── Card – author ──────────────────────────── */
+  --ik-post-card-author-offset: 4px;
+  --ik-post-card-author-block-width: calc(100% - 58px);
+  --ik-post-card-author-min-height: 32px;
+  --ik-post-card-author-padding-left: 8px;
+  --ik-post-card-author-name-size: 15px;
+  --ik-post-card-author-name-color: #fff;
+
+  /* ── Card – title ───────────────────────────── */
+  --ik-post-card-title-size: 17px;
+  --ik-post-card-title-color: #2196f3;
+  --ik-post-card-title-read-color: #9e9e9e;
+}
+
+* {
+  box-sizing: border-box;
+  /* 去掉移动端点按按钮/图片/链接时出现的蓝灰色高亮方块 */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 触摸/鼠标点击后不残留焦点描边；仅键盘 Tab 导航时显示可见焦点（保留无障碍） */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+html,
+body,
+#__nuxt {
+  margin: 0;
+  min-height: 100%;
+  background: #000;
+  color: var(--ik-text);
+  /* 品牌字体（印品鸿蒙体，见 fonts.css）；缺字逐字回退到系统中文黑体 */
+  font-family: "InterKnot Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  /* 与官网一致的字体平滑：让印品鸿蒙体的笔画在高分屏上更细腻不发糊 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  cursor: var(--ik-cursor-default);
+  /* 隐藏滚动条 (IE, Edge, Firefox) */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 阻止浏览器原生 pull-to-refresh，确保自定义下拉刷新正常工作 */
+html {
+  overscroll-behavior-y: contain;
+}
+
+/* 隐藏滚动条 (Chrome, Safari, Opera) */
+#__nuxt {
+  position: relative;
+  isolation: isolate;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#__nuxt::-webkit-scrollbar {
+  display: none;
+}
+
+/* 移动端全局隐藏所有滚动条（原生 + 自定义 z-scrollbar 组件）。
+   使用 !important 覆盖组件内 scrollbar-width: thin 等显式声明。 */
+@media (max-width: 768px) {
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  /* zenless-ui z-scrollbar 组件的自定义滚动条轨道 */
+  .z-scrollbar__bar {
+    display: none !important;
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a,
+button,
+summary,
+[role="button"],
+[tabindex]:not([tabindex="-1"]),
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+.z-button,
+.z-link,
+.ik-card,
+.ik-dialog__close,
+.ik-comment__like-btn {
+  cursor: var(--ik-cursor-pointer) !important;
+}
+
+.ik-dialog__close:hover {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  cursor: var(--ik-cursor-text) !important;
+  caret-color: var(--ik-primary);
+}
+
+button:disabled,
+[aria-disabled="true"],
+.is-disabled,
+.z-button--disabled {
+  cursor: var(--ik-cursor-not-allowed) !important;
+}
+
+[aria-busy="true"],
+.is-loading,
+.z-button--loading {
+  cursor: var(--ik-cursor-progress) !important;
+}
+
+.ik-cursor-help {
+  cursor: var(--ik-cursor-help) !important;
+}
+
+.ik-cursor-wait {
+  cursor: var(--ik-cursor-wait) !important;
+}
+
+.ik-cursor-cell {
+  cursor: var(--ik-cursor-cell) !important;
+}
+
+.ik-cursor-crosshair {
+  cursor: var(--ik-cursor-crosshair) !important;
+}
+
+.ik-cursor-pen {
+  cursor: var(--ik-cursor-pen) !important;
+}
+
+.ik-cursor-move {
+  cursor: var(--ik-cursor-move) !important;
+}
+
+.ik-cursor-row-resize {
+  cursor: var(--ik-cursor-row-resize) !important;
+}
+
+.ik-cursor-col-resize {
+  cursor: var(--ik-cursor-col-resize) !important;
+}
+
+.ik-cursor-nwse-resize {
+  cursor: var(--ik-cursor-nwse-resize) !important;
+}
+
+.ik-cursor-nesw-resize {
+  cursor: var(--ik-cursor-nesw-resize) !important;
+}
+
+.container {
+  width: min(1200px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.ik-page {
+  padding: 0;
+}
+
+.ik-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.ik-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ik-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.ik-panel {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #2d2d2d;
+  background: linear-gradient(180deg, #212121 0%, #181818 100%);
+}
+
+.ik-meta {
+  color: var(--ik-muted);
+  font-size: 13px;
+}
+
+.ik-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+}
+
+.ik-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--ik-muted);
+}
+
+/* ── Image fade-in on load ──────────────────── */
+img:not(.ik-card__cover) {
+  opacity: 0;
+  transition: opacity 280ms ease;
+}
+
+/* SPA 首屏 loading（spa-loading-template.html）须始终可见，勿受上方规则影响 */
+#spa-loading-screen img {
+  opacity: 1;
+  transition: none;
+}
+
+img:not(.ik-card__cover).ik-img-revealed {
+  opacity: 1;
+}
+
+/* ── lightGallery overrides ──────────────────── */
+.lg-backdrop {
+  z-index: 10000 !important;
+}
+.lg-outer {
+  z-index: 10001 !important;
+}
+
+/* 工具栏图标 hover / active */
+.lg-toolbar .lg-icon:hover,
+.lg-actions .lg-icon:hover {
+  color: var(--ik-primary);
+}
+
+/* 进度条 */
+.lg-progress-bar .lg-progress {
+  background-color: var(--ik-primary) !important;
+}
+
+/* 计数器 */
+.lg-counter {
+  color: var(--ik-primary);
+}
+
+/* 当前缩略图边框 */
+.lg-thumb-item.active,
+.lg-thumb-item:hover {
+  border-color: var(--ik-primary) !important;
+}
+
+/* 自动播放按钮 active 状态 */
+.lg-autoplay-button:hover .lg-icon {
+  color: var(--ik-primary);
+}
+
+/* ── Message toast 覆盖（高于弹窗 z-index:9000，位于 header 下方）── */
+.z-message {
+  z-index: 9999 !important;
+  top: 90px !important;
+}
+
+@media (max-width: 768px) {
+  .container {
+    width: calc(100% - 20px);
+  }
+
+  .ik-page {
+    padding-bottom: 64px;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   ZZZ Overlay Modal Transitions —— 全局共享
+   ───────────────────────────────────────────────
+   适用：所有用 <Transition name="ik-overlay"> 包裹、根类名为 .ik-overlay
+   的弹窗（PostOverlay / KnockKnockModal / LoginDialog /
+   ConfirmDialog / ProfileSettingsModal /
+   BusinessCardModal / AvatarModal …）
+
+   设计参考 Flutter showZZZDialog，针对 web 端调优。详见
+   PostOverlay.vue 顶部注释。
+
+   - 时长统一 200ms（enter / leave 同长）
+   - 三层（背景 / stripe / dialog）共用同一条曲线同步进退：
+       enter → easeOutQuart
+       leave → easeInQuart
+     避免任一层比其它层早 1 帧到位/退场造成的视觉错位闪烁。
+   - dialog 默认 transform 仅含 translateX(±5%)（FractionalTranslation
+     等价）。如某弹窗 dialog 自身带 scale 等静态变换，需在自己的 scoped
+     style 里覆写 enter-from / leave-to 的 transform 值（更高 specificity
+     自动生效）。
+   ═══════════════════════════════════════════════ */
+
+:where(.ik-overlay-enter-active, .ik-overlay-leave-active) {
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-in-quart: cubic-bezier(0.895, 0.03, 0.685, 0.22);
+}
+
+/* ── Enter ─────────────────────────────────────── */
+.ik-overlay-enter-active {
+  transition: background-color 200ms var(--ease-out-quart);
+  will-change: background-color;
+}
+
+.ik-overlay-enter-active .ik-overlay__stripe {
+  transition: opacity 200ms var(--ease-out-quart);
+  will-change: opacity;
+}
+
+.ik-overlay-enter-active .ik-dialog,
+.ik-overlay-enter-active .ik-bc-dialog,
+.ik-overlay-enter-active .ik-av-dialog,
+.ik-overlay-enter-active .ik-img-dialog,
+.ik-overlay-enter-active .ik-crop-dialog {
+  transition:
+    transform 200ms var(--ease-out-quart),
+    opacity 200ms var(--ease-out-quart);
+  will-change: transform, opacity;
+}
+
+.ik-overlay-enter-from {
+  background-color: transparent !important;
+}
+
+.ik-overlay-enter-from .ik-overlay__stripe {
+  opacity: 0;
+}
+
+.ik-overlay-enter-from .ik-dialog,
+.ik-overlay-enter-from .ik-bc-dialog,
+.ik-overlay-enter-from .ik-av-dialog,
+.ik-overlay-enter-from .ik-img-dialog,
+.ik-overlay-enter-from .ik-crop-dialog {
+  opacity: 0;
+  transform: translateX(5%);
+}
+
+/* ── Leave ─────────────────────────────────────── */
+.ik-overlay-leave-active {
+  transition: background-color 200ms var(--ease-in-quart);
+  will-change: background-color;
+}
+
+.ik-overlay-leave-active .ik-overlay__stripe {
+  transition: opacity 200ms var(--ease-in-quart);
+  will-change: opacity;
+}
+
+.ik-overlay-leave-active .ik-dialog,
+.ik-overlay-leave-active .ik-bc-dialog,
+.ik-overlay-leave-active .ik-av-dialog,
+.ik-overlay-leave-active .ik-img-dialog,
+.ik-overlay-leave-active .ik-crop-dialog {
+  transition:
+    transform 200ms var(--ease-in-quart),
+    opacity 200ms var(--ease-in-quart);
+  will-change: transform, opacity;
+}
+
+.ik-overlay-leave-to {
+  background-color: transparent !important;
+}
+
+.ik-overlay-leave-to .ik-overlay__stripe {
+  opacity: 0;
+}
+
+.ik-overlay-leave-to .ik-dialog,
+.ik-overlay-leave-to .ik-bc-dialog,
+.ik-overlay-leave-to .ik-av-dialog,
+.ik-overlay-leave-to .ik-img-dialog,
+.ik-overlay-leave-to .ik-crop-dialog {
+  opacity: 0;
+  transform: translateX(-5%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ik-overlay-enter-active,
+  .ik-overlay-enter-active .ik-overlay__stripe,
+  .ik-overlay-enter-active .ik-dialog,
+  .ik-overlay-enter-active .ik-bc-dialog,
+  .ik-overlay-enter-active .ik-av-dialog,
+  .ik-overlay-enter-active .ik-img-dialog,
+  .ik-overlay-enter-active .ik-crop-dialog,
+  .ik-overlay-leave-active,
+  .ik-overlay-leave-active .ik-overlay__stripe,
+  .ik-overlay-leave-active .ik-dialog,
+  .ik-overlay-leave-active .ik-bc-dialog,
+  .ik-overlay-leave-active .ik-av-dialog,
+  .ik-overlay-leave-active .ik-img-dialog,
+  .ik-overlay-leave-active .ik-crop-dialog {
+    transition: none;
+  }
+}
+
+/* 当页面上有任何包含 .ik-overlay 类名的弹窗（包括委托详情、敲敲私聊、名片修改、头像修改、更多操作、签到帮助等）处于激活/显示状态时，暂停全局背景跑马灯动画以最大化释放 GPU 渲染开销 */
+body:has(.ik-overlay, .ik-img-overlay) .ik-global-marquee .ik-zzz-marquee__track {
+  animation-play-state: paused !important;
+}
+
+/* 当任意弹窗处于激活状态时，暂停顶部导航栏（AppHeader）激活标签背后的呼吸动画（ik-tab-highlight），彻底消除遮罩下的多余重绘/重排开销 */
+body:has(.ik-overlay, .ik-img-overlay) .ik-header-tab.is-active .ik-tab-highlight {
+  animation-play-state: paused !important;
+}
+
+/* 当页面失去焦点、最小化或用户切到其他浏览器标签页（is-page-blurred）时，暂停所有跑马灯和顶部导航标签背后的呼吸动画，极大减少非活动状态下的设备能耗与 CPU/GPU 占用 */
+body.is-page-blurred .ik-zzz-marquee__track,
+body.is-page-blurred .ik-header-tab.is-active .ik-tab-highlight {
+  animation-play-state: paused !important;
+}
+
+/* ═══════════════════════════════════════════════
+   Mobile Overlay Performance —— 移动端弹窗专项降级
+   ───────────────────────────────────────────────
+   移动端/平板 GPU 对全屏 backdrop-filter blur 计算能力有限，
+   在弹窗 200ms 入场/离场动画期间持续重算模糊会导致掉帧。
+   这里统一为所有使用 .ik-overlay 的弹窗做降级：
+   - 取消 backdrop-filter，改用更深的纯半透明背景
+   - 弹窗内图片直接显示，不播放全局 280ms opacity 淡入
+   视觉差异：遮罩更深（0.88 黑），无毛玻璃；文字/边框对比度反而更高。
+   ═══════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  /* 用 body 前缀提高优先级，覆盖各组件 scoped style 中的 .ik-overlay 声明 */
+  body .ik-overlay {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: rgba(0, 0, 0, 0.88);
+  }
+
+  body .ik-overlay img:not(.ik-card__cover) {
+    /* 保留 opacity 0 初始状态，让下方 blur-up 预览图可见；
+       移除 280ms 淡入过渡，避免入场动画期间触发 paint，
+       img.revealed 时直接 opacity 1 无动画。 */
+    transition: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   无 GPU 加速降级
+   ─────────────────────────────────────────────────
+   当 useGpuAccelerated 检测到浏览器使用 SwiftShader / Software
+   等软件渲染器时，给 html 添加 .no-gpu。此时关闭全屏跑马灯，
+   避免 CPU 路径下超大移动文字导致滚动重绘掉帧。
+   ═══════════════════════════════════════════════════ */
+html.no-gpu .ik-zzz-marquee,
+html.no-gpu .ik-global-marquee {
+  display: none !important;
+}
+
+/* 进一步关闭卡片 hover/入场动画，避免无 GPU 时移动鼠标或首屏加载触发持续重绘。 */
+html.no-gpu .ik-card__cover {
+  transition: none !important;
+}
+
+html.no-gpu .ik-card:hover .ik-card__cover {
+  --ik-cover-scale: 1 !important;
+}
+
+html.no-gpu .ik-masonry-card-enter {
+  animation: none !important;
+}
+
+/* backdrop-filter 预热元素在 CPU 路径下也会参与每帧合成/重绘，
+   无 GPU 时一并隐藏。 */
+html.no-gpu .ik-backdrop-warmup {
+  display: none !important;
+}
+
+/* 卡片阅读量遮罩的阴影 / SVG drop-shadow 在 CPU 路径下每个卡片都需
+   额外绘制，无 GPU 时移除可显著减少 overdraw。 */
+html.no-gpu .ik-card__views {
+  text-shadow: none !important;
+}
+
+html.no-gpu .ik-card__views-icon {
+  filter: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   无 GPU 弹窗性能降级
+   ─────────────────────────────────────────────────
+   弹窗入场 / 离场期间 backdrop-filter blur 会在 CPU 路径下每帧重算，
+   导致动画掉帧；同时斜线纹理、跑马灯、dialog 位移动画都会加重重绘。
+   这里统一关闭弹窗相关模糊、纹理和 CSS 过渡/动画。
+   ═══════════════════════════════════════════════════ */
+
+/* 关闭所有元素的 backdrop-filter，覆盖 ik-overlay / ik-img-overlay
+   以及各组件 scoped style 中的声明。 */
+html.no-gpu * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* 用更深的纯色遮罩替代毛玻璃，保证可读性；同时覆盖 PostOverlay 变量。 */
+html.no-gpu .ik-overlay,
+html.no-gpu .ik-img-overlay {
+  background: rgba(0, 0, 0, 0.88) !important;
+}
+
+html.no-gpu .ik-overlay.ik-overlay {
+  --ik-overlay-bg: rgba(0, 0, 0, 0.88) !important;
+}
+
+html.no-gpu .ik-img-overlay__backdrop,
+html.no-gpu .ik-overlay__backdrop {
+  background: rgba(0, 0, 0, 0.88) !important;
+  opacity: 1 !important;
+}
+
+/* 隐藏弹窗内装饰性斜线纹理和跑马灯。 */
+html.no-gpu .ik-overlay__stripe,
+html.no-gpu .ik-zzz-marquee {
+  display: none !important;
+}
+
+/* 禁用 .ik-overlay 弹窗的入场 / 离场过渡，避免无 GPU 时 transform/opacity
+   动画造成持续重绘。 */
+html.no-gpu .ik-overlay-enter-active,
+html.no-gpu .ik-overlay-enter-active .ik-overlay__stripe,
+html.no-gpu .ik-overlay-enter-active .ik-overlay__backdrop,
+html.no-gpu .ik-overlay-enter-active .ik-dialog,
+html.no-gpu .ik-overlay-enter-active .ik-bc-dialog,
+html.no-gpu .ik-overlay-enter-active .ik-av-dialog,
+html.no-gpu .ik-overlay-enter-active .ik-img-dialog,
+html.no-gpu .ik-overlay-enter-active .ik-crop-dialog,
+html.no-gpu .ik-overlay-leave-active,
+html.no-gpu .ik-overlay-leave-active .ik-overlay__stripe,
+html.no-gpu .ik-overlay-leave-active .ik-overlay__backdrop,
+html.no-gpu .ik-overlay-leave-active .ik-dialog,
+html.no-gpu .ik-overlay-leave-active .ik-bc-dialog,
+html.no-gpu .ik-overlay-leave-active .ik-av-dialog,
+html.no-gpu .ik-overlay-leave-active .ik-img-dialog,
+html.no-gpu .ik-overlay-leave-active .ik-crop-dialog {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* 弹窗内非卡片的图片淡入也关闭。 */
+html.no-gpu .ik-overlay img:not(.ik-card__cover),
+html.no-gpu .ik-img-overlay img:not(.ik-card__cover) {
+  transition: none !important;
+}
+
+/* 其它常见弹窗 / 浮层淡入过渡统一关闭。 */
+html.no-gpu .ik-fade-enter-active,
+html.no-gpu .ik-fade-leave-active,
+html.no-gpu .ik-img-fade-enter-active,
+html.no-gpu .ik-img-fade-leave-active,
+html.no-gpu .ik-hovercard-enter-active,
+html.no-gpu .ik-hovercard-leave-active,
+html.no-gpu .ik-mobile-sheet-enter-active,
+html.no-gpu .ik-mobile-sheet-leave-active,
+html.no-gpu .ik-mobile-sheet-enter-active .ik-mobile-sheet__panel,
+html.no-gpu .ik-mobile-sheet-leave-active .ik-mobile-sheet__panel {
+  transition: none !important;
+  animation: none !important;
+}

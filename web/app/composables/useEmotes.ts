@@ -1,0 +1,149 @@
+/**
+ * useEmotes —— 表情清单（manifest）的拉取与缓存。
+ *
+ * 使用 TanStack Vue Query 在全局缓存 manifest，staleTime 60s：
+ * 同一页面内反复渲染不重拉，但后台增删表情后能很快被前端感知
+ * （EmotePicker 每次打开时调 refreshIfStale 重拉过期清单）。
+ *
+ * 暴露：
+ * - emotes: Ref<Emote[]>（扁平列表）
+ * - groupedEmotes: 按后台分组（名称 + order）分区排序
+ * - emoteMap: Ref<Map<string, Emote>>（code → Emote，供 EmoteImage 快速查找）
+ * - loading: Ref<boolean>
+ *
+ * 首次调用时自动 fetch，后续调用复用全局缓存。
+ */
+
+import { computed, type Ref } from "vue";
+import { useQuery } from "@tanstack/vue-query";
+import { useNuxtApp } from "#app";
+import { toMediaUrl } from "~/utils/image";
+
+export interface Emote {
+  code: string;
+  name: string;
+  /** 分组名称（后台维护，未分组时为「通用」） */
+  group: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  /** 是否出现在表情面板里；下架的表情仍要能渲染旧评论 */
+  selectable: boolean;
+}
+
+export interface EmoteGroup {
+  name: string;
+  order: number;
+  /** 分组自定义图标 URL（后台维护），未设置时为 null，前端降级用首个表情 */
+  iconUrl: string | null;
+}
+
+interface ManifestResponse {
+  groups?: Array<{ id: string; name: string; iconUrl?: string | null }>;
+  emotes?: Array<{
+    code: string;
+    name: string;
+    groupId?: string | null;
+    url: string;
+    width?: number | null;
+    height?: number | null;
+    selectable: boolean;
+  }>;
+}
+
+interface ManifestData {
+  groups: EmoteGroup[];
+  emotes: Emote[];
+}
+
+const EMOTE_STALE_TIME = 60 * 1000; // 60s
+
+/** 全局 queryKey，确保所有调用方共享同一份缓存 */
+const EMOTE_MANIFEST_KEY = ["emotes", "manifest"] as const;
+
+/** 把表情 URL 迁移到当前图片 CDN：相对路径补齐为 im.tiwat.cn，旧七牛云域名重写。 */
+function normalizeEmoteUrl(url: string): string {
+  return toMediaUrl(url);
+}
+
+export function useEmotes() {
+  const { $api } = useNuxtApp();
+
+  const query = useQuery<ManifestData>({
+    queryKey: EMOTE_MANIFEST_KEY as unknown as readonly unknown[],
+    queryFn: async () => {
+      // cache: "no-cache" 强制走条件请求（服务端带 ETag），避免旧的浏览器 HTTP 缓存把清单钉住
+      const data = ((await $api("/v1/emotes", { cache: "no-cache" })) || {}) as ManifestResponse;
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      const groupName = new Map(groups.map((g) => [g.id, g.name]));
+      return {
+        groups: groups.map((g, order) => ({
+          name: g.name,
+          order,
+          iconUrl: g.iconUrl ? normalizeEmoteUrl(g.iconUrl) : null,
+        })),
+        emotes: (Array.isArray(data.emotes) ? data.emotes : []).map((e) => ({
+          code: e.code,
+          name: e.name,
+          group: (e.groupId && groupName.get(e.groupId)) || "通用",
+          url: normalizeEmoteUrl(e.url),
+          width: e.width ?? null,
+          height: e.height ?? null,
+          selectable: e.selectable !== false,
+        })),
+      };
+    },
+    staleTime: EMOTE_STALE_TIME,
+    gcTime: 60 * 60 * 1000, // 1 hour gc
+  });
+
+  const emotes: Ref<Emote[]> = computed(() => query.data.value?.emotes ?? []);
+  const emoteGroups: Ref<EmoteGroup[]> = computed(() => query.data.value?.groups ?? []);
+
+  /** code → Emote 快速查找表 */
+  const emoteMap: Ref<Map<string, Emote>> = computed(() => {
+    const map = new Map<string, Emote>();
+    for (const e of emotes.value) {
+      map.set(e.code, e);
+    }
+    return map;
+  });
+
+  /** 按分组名分区，分组顺序跟随 manifest.groups（未知分组追加在后） */
+  const groupedEmotes = computed(() => {
+    const groups = new Map<string, Emote[]>();
+    for (const g of emoteGroups.value) {
+      groups.set(g.name, []);
+    }
+    for (const e of emotes.value) {
+      // 下架的表情只用于渲染旧评论，不出现在面板里
+      if (!e.selectable) continue;
+      const name = e.group || "通用";
+      let arr = groups.get(name);
+      if (!arr) {
+        arr = [];
+        groups.set(name, arr);
+      }
+      arr.push(e);
+    }
+    // 去掉没有任何表情的空分组
+    for (const [name, arr] of groups) {
+      if (arr.length === 0) groups.delete(name);
+    }
+    return groups;
+  });
+
+  /** 清单已过期时重拉一次（EmotePicker 打开时调用） */
+  function refreshIfStale() {
+    if (query.isStale.value) void query.refetch();
+  }
+
+  return {
+    emotes,
+    emoteGroups,
+    emoteMap,
+    groupedEmotes,
+    loading: computed(() => query.isLoading.value),
+    refreshIfStale,
+  };
+}

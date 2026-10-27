@@ -1,0 +1,1574 @@
+<script setup lang="ts">
+import { useDebounceFn, useWindowSize, useMediaQuery } from "@vueuse/core";
+import { useMessage } from "zenless-ui";
+import type { ArticleFeed, ArticleSort, Category, Post } from "~/types/entities";
+import { resolveErrorMessage } from "~/utils/api-error";
+import { getCoverAspectRatio } from "~/utils/cover";
+import { estimatePostCardHeight } from "~/utils/post-card-height";
+import { calculateSkeletonCount, estimateSkeletonHeight, generateSkeletons, type SkeletonItem } from "~/utils/skeleton";
+import {
+  ArrowPathIcon,
+  ClockIcon,
+  FireIcon,
+  EyeIcon,
+  BookmarkIcon,
+  UserGroupIcon,
+  MagnifyingGlassIcon,
+} from "@heroicons/vue/24/outline";
+import {
+  TabsRoot,
+  TabsList,
+  TabsTrigger,
+  TabsIndicator,
+  ScrollAreaRoot,
+  ScrollAreaViewport,
+} from "reka-ui";
+import { useArticleFeedUpdates } from "~/composables/useArticleFeedUpdates";
+
+// 静态导入核心瀑布流组件，防止下滑加载或冷启动时动态请求分包导致滚动卡顿
+import VirtualMasonry from "~/components/VirtualMasonry.vue";
+import PostCard from "~/components/PostCard.vue";
+import PostCardSkeleton from "~/components/PostCardSkeleton.vue";
+import HomeFeedNavigation from "~/components/HomeFeedNavigation.vue";
+
+const api = useApi();
+const homeStateCache = useHomeStateCache();
+const pendingPost = usePendingPost();
+const route = useRoute();
+const postModal = usePostModal();
+const message = useMessage();
+const pageDataLoading = usePageDataLoading();
+const auth = useAuthStore();
+const loginDialog = useLoginDialog();
+const { online: presenceOnline, avatars: presenceAvatars } = usePresence();
+// 头像堆叠最多展示几个，剩余的用 +N 收口。
+const PRESENCE_AVATAR_MAX = 5;
+const presenceShownAvatars = computed(() => presenceAvatars.value.slice(0, PRESENCE_AVATAR_MAX));
+const presenceOverflow = computed(() =>
+  Math.max(0, presenceOnline.value - presenceShownAvatars.value.length),
+);
+
+useSeoMeta({
+  title: "绳网",
+  description: "新艾利都最大的匿名委托中枢。",
+  ogTitle: "绳网",
+  ogDescription: "新艾利都最大的匿名委托中枢。",
+});
+
+const scrollTarget = ref<HTMLElement>();
+// z-backtop listens on target's "scroll" event and reads target.scrollTop
+// But document.documentElement may not fire "scroll" events in all browsers.
+// Bridge window scroll events to the element so z-backtop works correctly.
+// 记住函数引用 + 使用 passive，使浏览器可以乐观滚动；onBeforeUnmount 里清理
+// 避免路由切走后仍在全局 dispatch 事件。
+let scrollBridge: (() => void) | null = null;
+let stopPendingWatch: (() => void) | null = null;
+onMounted(() => {
+  const el = document.documentElement;
+  scrollBridge = () => {
+    el.dispatchEvent(new Event("scroll"));
+  };
+  window.addEventListener("scroll", scrollBridge, { passive: true });
+  scrollTarget.value = el;
+});
+
+const LOAD_MORE_ROOT_MARGIN = "360px 0px";
+const query = ref(pickFirstQuery(route.query.q as string | string[] | undefined));
+// 频道筛选：空串 = 全部频道（此时由排序 Tab「最新 / 热门」决定看哪条流）。
+const categories = ref<Category[]>([]);
+const selectedCategory = ref<string>("");
+
+// 排序：最新（纯时间序）/ 热门（纯热度榜）。两条流互斥——用户反馈「热门就只有
+// 热门，最新就只有最新」，所以「最新」下后端不再往列表顶部注入热门帖，热门内容
+// 改由「热门」这条独立的流承载（见 server listLite 的 sort 参数）。
+// 两个 Tab 排在分类栏最前，与分类同款造型 ⇒ 语义也与分类一致：整行单选。
+// 选择记在 localStorage：刷新或下次进站保持上次看的那条流。默认「最新」。
+const SORT_STORAGE_KEY = "ik:home-sort";
+
+const readStoredSort = (): ArticleSort => {
+  if (!import.meta.client) return "latest";
+  try {
+    const val = localStorage.getItem(SORT_STORAGE_KEY);
+    if (val === "hot" || val === "latest") return val;
+    // 「未看」依赖账号的阅读记录：未登录时先回落默认档
+    if (val === "unread") return auth.isLogin ? val : "latest";
+    // 已下线的旧档（如「推荐」）一律回落默认档
+    return "latest";
+  } catch {
+    // 隐私模式下读取即抛错，回落默认档
+    return "latest";
+  }
+};
+
+const sortMode = ref<ArticleSort>(readStoredSort());
+
+/**
+ * 用户主动点排序 Tab：既切当前档，也记进 localStorage 作为下次进站的默认。
+ * 不做「值没变就 return」的去重——ref 赋同值本身不会触发 watcher，而点击这个动作
+ * 无论如何都表达了「我以后默认看这条流」（比如先点了分类把当前档带回最新，
+ * 再点「最新」时值没变，但偏好确实该落到最新）。
+ */
+const setSortMode = (mode: ArticleSort) => {
+  sortMode.value = mode;
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, mode);
+  } catch {
+    // 写入失败（隐私模式 / 配额）只影响下次进站的默认档，本次切换照常生效
+  }
+};
+
+// feed 模式：全部（主信息流）/ 关注（我关注的作者）/ 收藏（我的收藏）。
+// 关注、收藏需登录；缓存键随 feed 一起隔离（见 useApi.searchArticles）。
+const feedMode = ref<ArticleFeed>("all");
+const FEED_PANEL_ID = "ik-home-feed-panel";
+
+interface NavTab {
+  key: string;
+  label: string;
+  icon: any;
+}
+
+/** 当前生效的搜索词：仅主信息流支持文本搜索，关注/收藏强制走列表流。 */
+const activeQuery = () => (feedMode.value === "all" ? query.value.trim() : "");
+
+/** 搜索态：搜索结果按相关性排，排序 Tab 不参与（「热门」Tab 此时不渲染）。 */
+const isSearching = computed(() => !!query.value.trim());
+
+const activeSort = computed<ArticleSort>(() =>
+  feedMode.value === "all" && !isSearching.value ? sortMode.value : "latest",
+);
+
+const isUnreadFeed = computed(() => activeSort.value === "unread");
+
+const mainNavTabs = computed<NavTab[]>(() => {
+  if (isSearching.value) {
+    return [
+      { key: "search", label: "搜索结果", icon: MagnifyingGlassIcon },
+      { key: "following", label: "关注", icon: UserGroupIcon },
+      { key: "favorites", label: "收藏", icon: BookmarkIcon },
+    ];
+  }
+  return [
+    { key: "latest", label: "最新", icon: ClockIcon },
+    { key: "hot", label: "热门", icon: FireIcon },
+    { key: "unread", label: "未看", icon: EyeIcon },
+    { key: "following", label: "关注", icon: UserGroupIcon },
+    { key: "favorites", label: "收藏", icon: BookmarkIcon },
+  ];
+});
+
+const currentTab = computed(() => {
+  if (isSearching.value) {
+    return feedMode.value === "all" ? "search" : feedMode.value;
+  }
+  if (feedMode.value !== "all") {
+    return feedMode.value;
+  }
+  return activeSort.value;
+});
+
+const activeTabTriggerId = computed(() => `ik-tab-${currentTab.value}`);
+
+const isCategoryFilterVisible = computed(
+  () => !isSearching.value && currentTab.value !== "hot" && feedMode.value === "all",
+);
+
+let lastLoginOpenTime = 0;
+const openLoginDialogOnce = () => {
+  const now = Date.now();
+  if (now - lastLoginOpenTime > 150) {
+    lastLoginOpenTime = now;
+    loginDialog.open();
+  }
+};
+
+// 已读状态按账号记录，游客没有「看过」可言。
+const LOGIN_REQUIRED_TABS = new Set(["unread", "following", "favorites"]);
+
+const handleTriggerPointerDown = (key: string, event: Event) => {
+  if (LOGIN_REQUIRED_TABS.has(key) && !auth.isLogin) {
+    event.preventDefault();
+    event.stopPropagation();
+    openLoginDialogOnce();
+  }
+};
+
+const handleTriggerKeyDown = (key: string, event: KeyboardEvent) => {
+  if (event.key === "Enter" || event.key === " ") {
+    if (LOGIN_REQUIRED_TABS.has(key) && !auth.isLogin) {
+      event.preventDefault();
+      event.stopPropagation();
+      openLoginDialogOnce();
+    }
+  }
+};
+
+const handleTabChange = (val: string | number) => {
+  const tabKey = String(val);
+  if (tabKey === currentTab.value) return;
+
+  if (tabKey === "following" || tabKey === "favorites") {
+    if (!auth.isLogin) {
+      openLoginDialogOnce();
+      return;
+    }
+    selectedCategory.value = "";
+    feedMode.value = tabKey as ArticleFeed;
+    return;
+  }
+
+  if (tabKey === "search") {
+    feedMode.value = "all";
+    selectedCategory.value = "";
+    return;
+  }
+
+  if (tabKey === "hot") {
+    if (feedMode.value !== "all") feedMode.value = "all";
+    selectedCategory.value = "";
+    setSortMode("hot");
+    return;
+  }
+
+  if (tabKey === "unread" && !auth.isLogin) {
+    openLoginDialogOnce();
+    return;
+  }
+
+  if (tabKey === "latest" || tabKey === "unread") {
+    if (feedMode.value !== "all") {
+      feedMode.value = "all";
+      selectedCategory.value = "";
+    }
+    setSortMode(tabKey);
+  }
+};
+
+const selectAllCategories = () => {
+  if (feedMode.value !== "all") feedMode.value = "all";
+  if (selectedCategory.value === "") return;
+  selectedCategory.value = "";
+};
+
+const selectSort = (mode: ArticleSort) => {
+  if (feedMode.value !== "all") feedMode.value = "all";
+  selectedCategory.value = "";
+  setSortMode(mode);
+};
+
+const loading = ref(false);
+const loadingMore = ref(false);
+const refreshing = ref(false);
+
+const list = shallowRef<Post[]>([]);
+const enterAnimationIds = shallowRef(new Set<string>());
+// 信息流游标：后端给的不透明 nextCursor，只负责存下来原样回传。空串 = 第一页。
+const endCursor = ref("");
+const hasNextPage = ref(true);
+const requestVersion = ref(0);
+let seenIds = new Set<string>();
+let listProgressClaimed = false;
+// 网络状态独立于骨架屏：缓存预填/主动刷新不显示骨架，但仍须阻止分页抢占首屏。
+let listRequestPending = false;
+let hasSettledPage = false;
+let disposed = false;
+
+// VirtualMasonry 模板引用，用于读取 expose 的 measuredHeights
+const masonryRef = ref<{ measuredHeights: Map<string | number, number>; $el: HTMLElement } | null>(null);
+// 从缓存恢复的已测量高度，传给 VirtualMasonry.initialHeights
+const cachedMeasuredHeights = shallowRef<Map<string | number, number> | undefined>(undefined);
+
+const loadMoreSentinelRef = ref<HTMLElement | null>(null);
+const loadMoreObserverRef = shallowRef<IntersectionObserver | null>(null);
+
+// ── 后台轮询：检测有无新委托（仅在无搜索关键词时启用） ─────────
+const NEW_ARTICLES_POLL_MS = 60_000;
+// 最新、热门、未看都接收 SSE；查看更新时仅把事件批次置顶，其余列表顺序与分页保持不变。
+const feedStreamEnabled = computed(
+  () => feedMode.value === "all" && !query.value.trim(),
+);
+const feedUpdates = useArticleFeedUpdates({
+  posts: list,
+  enabled: feedStreamEnabled,
+  scope: computed(() => JSON.stringify([
+    feedMode.value, selectedCategory.value, activeSort.value, query.value, auth.generation,
+  ])),
+  canApply: () => !listRequestPending && !refreshing.value && !loading.value,
+  load: async (ids) => {
+    const posts = await api.getArticleUpdates(ids, selectedCategory.value);
+    if (!isUnreadFeed.value) return posts;
+    // 更新批次走的是最新流接口：按它返回的已读标记，不把被新回复顶起的已读帖插进「未看」；
+    // 本来就在列表里的（本次浏览刚点开的）原地保留。
+    const listed = new Set(list.value.map((post) => post.id));
+    return posts.filter((post) => !post.isRead || listed.has(post.id));
+  },
+  onApplied: () => {
+    seenIds = new Set(list.value.map((post) => post.id));
+    const version = requestVersion.value;
+    void nextTick().then(() => {
+      if (!disposed && version === requestVersion.value) window.scrollTo({ top: 0, behavior: "auto" });
+    });
+  },
+  onError: (error) => message.error(resolveErrorMessage(error, "获取更新失败，请重试")),
+});
+const {
+  pendingIds: newArticleIds,
+  applying: applyingNewArticles,
+  highlightedIds: highlightedArticleIds,
+  announcement: updateAnnouncement,
+} = feedUpdates;
+const hasNewArticles = computed(() => newArticleIds.value.length > 0);
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let polling = false;
+
+const masonryKeyMapper = (post: Post) => post.id;
+const skeletonKeyMapper = (item: SkeletonItem) => item.id;
+const initialWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+const { width: viewportWidth } = useWindowSize({ initialWidth });
+const isMobile = useMediaQuery("(max-width: 768px)", { ssrWidth: initialWidth });
+
+// 瀑布流列间距：移动端收窄，避免两列离得过远（与 .ik-home-container 的左右边距协调）
+const feedGap = computed(() => (viewportWidth.value && viewportWidth.value <= 768 ? 8 : 12));
+
+
+// 动画时长（与 CSS .ik-masonry-card-enter 严格对应）
+const CARD_ENTER_ANIMATION_MS = 360;
+// 兜底清理延迟：略大于动画时长，避免清理过早误伤还在播放的动画
+const CARD_ENTER_CLEANUP_MS = CARD_ENTER_ANIMATION_MS + 60;
+// 错开入场最大延迟（ms），按列数分摊
+const CARD_STAGGER_MAX_DELAY_MS = 120;
+
+const addEnterAnimations = (nodes: Post[]) => {
+  if (!nodes.length) return;
+
+  const nextIds = new Set(enterAnimationIds.value);
+  const addedIds: string[] = [];
+  for (const node of nodes) {
+    if (node.id) {
+      nextIds.add(node.id);
+      addedIds.push(node.id);
+    }
+  }
+  enterAnimationIds.value = nextIds;
+
+  // 兜底清理：虚拟化场景下，卡片在视口外被卸载时 `animationend` 不会触发，
+  // 导致 id 残留在 enterAnimationIds 里——用户滚回去时该卡片会**再次**应用
+  // ik-masonry-card-enter class，DOM 重挂时 CSS 动画又播一遍，造成"已经看过的
+  // 卡片入场动画重播"的怪异观感。300ms 后强制清除这一批 id，让动画状态终止。
+  // 走 finishEnterAnimation 复用 queueMicrotask 批量合并逻辑。
+  if (import.meta.client) {
+    setTimeout(() => {
+      for (const id of addedIds) finishEnterAnimation(id);
+    }, CARD_ENTER_CLEANUP_MS);
+  }
+};
+
+const shouldAnimatePost = (postId: string) => {
+  return enterAnimationIds.value.has(postId);
+};
+
+// 根据索引计算错开入场延迟，让卡片按列依次出现，减轻渲染压力
+const getStaggerDelayStyle = (index: number, columnCount: number): Record<string, string> => {
+  // 按列位置分配延迟：同一列的卡片依次出现，不同列之间错开
+  const colIndex = index % Math.max(1, columnCount);
+  const rowIndex = Math.floor(index / Math.max(1, columnCount));
+  // 列间错开 + 行内微小错开
+  const delay = (colIndex * 40 + rowIndex * 20) % CARD_STAGGER_MAX_DELAY_MS;
+  return { animationDelay: `${delay}ms` };
+};
+
+// 一批新增卡片 240ms 内集中 animationend → 以前每次都 new Set(...) 拷贝，
+// N 条同时结束 → O(N²) 拷贝。改用微任务批量合并：同一任务队内所有 finish
+// 调用只触发一次 Set 重建 + 一次 reactive trigger。
+let pendingFinish: Set<string> | null = null;
+const finishEnterAnimation = (postId: string) => {
+  if (!enterAnimationIds.value.has(postId)) return;
+  if (!pendingFinish) {
+    pendingFinish = new Set();
+    queueMicrotask(() => {
+      const ids = pendingFinish;
+      pendingFinish = null;
+      if (!ids || ids.size === 0) return;
+      const next = new Set(enterAnimationIds.value);
+      for (const id of ids) next.delete(id);
+      enterAnimationIds.value = next;
+    });
+  }
+  pendingFinish.add(postId);
+};
+
+// 必须是不捕获 slot 变量的固定函数：写成 `finishEnterAnimation(item.id)` 时编译器
+// 每次渲染都生成新箭头函数，PostCard 未声明该事件，Vue 会把它当作 props 变化，
+// 导致可见卡片随 VirtualMasonry 每次渲染全部重渲染。id 从 data-post-id 读取。
+// animationend 会冒泡，只认卡片自身的入场动画（scoped 下 keyframes 名带后缀）。
+const onCardAnimationEnd = (e: AnimationEvent) => {
+  if (e.target !== e.currentTarget || !e.animationName.startsWith("ik-masonry-card-enter")) return;
+  const postId = (e.currentTarget as HTMLElement).dataset.postId;
+  if (postId) finishEnterAnimation(postId);
+};
+
+const skeletonCount = computed(() => {
+  return calculateSkeletonCount(viewportWidth.value, import.meta.client);
+});
+
+const skeletonItems = computed(() => generateSkeletons(skeletonCount.value));
+
+const toUniqueNodes = (nodes: Post[], reset: boolean): Post[] => {
+  if (reset) {
+    seenIds = new Set();
+  }
+
+  const unique: Post[] = [];
+  for (const node of nodes) {
+    if (!node.id || seenIds.has(node.id)) continue;
+    seenIds.add(node.id);
+    unique.push(node);
+  }
+  return unique;
+};
+
+const scrollToTopAfterReset = async (reset: boolean, version: number) => {
+  await nextTick();
+  if (!disposed && version === requestVersion.value && reset && import.meta.client) {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+};
+
+const fetchList = async (reset = false) => {
+  if (disposed) return;
+  // 重置请求必须能取代旧身份/筛选的在途请求；只有追加分页需要等待。
+  if (!reset && (listRequestPending || applyingNewArticles.value)) return;
+  if (!hasNextPage.value && !reset) return;
+  listRequestPending = true;
+  if (reset) hasSettledPage = false;
+
+  // 缓存命中预填：避免从其他页面切回首页时 skeleton → fade → list 双重过渡 440ms。
+  // 同步把缓存数据填进 list，模板首帧就走 "list" 分支，跳过 <Transition> 切换。
+  // 之后仍然 await searchArticles：fresh 时返回同引用无副作用；stale 时后台刷新替换。
+  // 仅对 reset=true（首屏 / 切回 / 切搜索词）启用；refreshing 是用户明确下拉，不走捷径。
+  let cacheHit = false;
+  if (reset && !refreshing.value) {
+    const cached = api.peekArticles(
+      activeQuery(),
+      "",
+      selectedCategory.value,
+      feedMode.value,
+      activeSort.value,
+    );
+    if (cached) {
+      const uniqueNodes = toUniqueNodes(cached.nodes, true);
+      enterAnimationIds.value = new Set();
+      list.value = uniqueNodes;
+      endCursor.value = cached.endCursor;
+      hasNextPage.value = cached.hasNextPage;
+      cacheHit = true;
+    }
+  }
+
+  const shouldShowPageProgress = reset && !refreshing.value && !cacheHit;
+  if (shouldShowPageProgress) {
+    if (!pageDataLoading.isActive.value) {
+      pageDataLoading.start();
+    }
+    pageDataLoading.claim();
+    listProgressClaimed = true;
+  }
+
+  // 缓存命中时不显 skeleton（loading 保持 false）；仅 cold load 才占位
+  if (reset) {
+    loading.value = !refreshing.value && !cacheHit;
+    loadingMore.value = false;
+  } else {
+    loadingMore.value = true;
+  }
+
+  const currentVersion = ++requestVersion.value;
+  try {
+    const page = await api.searchArticles(
+      activeQuery(),
+      reset ? "" : endCursor.value,
+      selectedCategory.value,
+      feedMode.value,
+      activeSort.value,
+    );
+    if (currentVersion !== requestVersion.value) {
+      return;
+    }
+
+    const uniqueNodes = toUniqueNodes(page.nodes, reset);
+
+    if (reset) {
+      if (refreshing.value) {
+        addEnterAnimations(uniqueNodes);
+      } else {
+        enterAnimationIds.value = new Set();
+      }
+      list.value = uniqueNodes;
+    } else {
+      addEnterAnimations(uniqueNodes);
+      list.value = [...list.value, ...uniqueNodes];
+    }
+
+    endCursor.value = page.endCursor;
+    hasNextPage.value = page.hasNextPage;
+    hasSettledPage = true;
+    if (reset || feedUpdates.reconciledBump.value === null) {
+      feedUpdates.seedPollingBaseline(page.nodes);
+    }
+
+    // 缓存命中路径下，scrollToTopAfterReset 不再需要（避免破坏用户期望的滚动位置）
+    if (!cacheHit) await scrollToTopAfterReset(reset, currentVersion);
+    return true;
+  } catch (err) {
+    if (currentVersion === requestVersion.value) {
+      message.error(resolveErrorMessage(err, "获取委托失败"));
+    }
+  } finally {
+    // 旧请求不能结束新请求的 loading / 进度条，也不能覆盖它的错误状态。
+    if (currentVersion === requestVersion.value) {
+      listRequestPending = false;
+      loading.value = false;
+      loadingMore.value = false;
+      if (listProgressClaimed) {
+        listProgressClaimed = false;
+        pageDataLoading.finish();
+      }
+      // 首屏在途时哨兵可能已经进入视口；完成后重新观察，避免漏掉自动续页。
+      void nextTick().then(() => {
+        if (!disposed && currentVersion === requestVersion.value) observeLoadMoreSentinel();
+      });
+    }
+  }
+};
+
+const goPost = (post: Post, event: MouseEvent) => {
+  // 阻止 NuxtLink 默认导航，改为弹窗展示
+  event.preventDefault();
+  postModal.open(post.id, {
+    coverAspectRatio: getCoverAspectRatio(post.coverWidth, post.coverHeight),
+    preview: {
+      title: post.title,
+      author: post.author,
+      createdAt: post.createdAt,
+      publishedAt: post.publishedAt,
+      firstPublishedAt: post.firstPublishedAt,
+      category: post.category ?? null,
+      cover: post.cover || undefined,
+    },
+  });
+
+  // 标记已读：网络请求立即发出（不占主线程），但本地 list 的重建推迟到
+  // 弹窗关闭之后——被点开的卡片在弹窗期间完全被遮住，用户看不到已读变化，
+  // 而重建数组会触发瀑布流重算 + 可见卡片 patch，与 PostOverlay 的挂载、
+  // 详情/评论数据回填渲染争抢主线程，正是「点开弹窗卡顿」的来源。
+  if (post.isRead || unsettledReadIds.has(post.id)) return;
+  const targetId = post.id;
+  const readGeneration = auth.generation;
+  pendingReadIds.add(targetId);
+  unsettledReadIds.add(targetId);
+  api.markAsReadBatch([targetId]).catch(() => {
+    if (disposed || auth.generation !== readGeneration) return;
+    // 失败时若尚未回填，从 pending 移除即可；若已回填到 list，需回滚已读态
+    if (pendingReadIds.delete(targetId)) return;
+    list.value = api.mergeReadStatus(list.value.map((d) =>
+      d.id === targetId && d.isRead ? { ...d, isRead: false } : d,
+    ));
+  }).finally(() => {
+    if (auth.generation === readGeneration) unsettledReadIds.delete(targetId);
+  });
+};
+
+// 弹窗期间累积的待回填已读 id；弹窗离场动画结束后一次性合并进 list
+const pendingReadIds = new Set<string>();
+// 未确认的乐观标记不能写进路由快照；确认后的状态由 API 的共享集合补齐。
+const unsettledReadIds = new Set<string>();
+
+const flushPendingReadIds = () => {
+  if (disposed) return;
+  const ids = new Set(pendingReadIds);
+  pendingReadIds.clear();
+  let changed = false;
+  const next = list.value.map((d) => {
+    if (ids.has(d.id) && !d.isRead) {
+      changed = true;
+      return { ...d, isRead: true };
+    }
+    return d;
+  });
+  list.value = api.mergeReadStatus(changed ? next : list.value);
+};
+
+// 确认响应可能在离开首页后才到达；新实例同样需要收到已读更新。
+watch(api.readStatusRevision, () => {
+  if (!disposed && !postModal.isOpen.value) {
+    list.value = api.mergeReadStatus(list.value);
+  }
+});
+
+watch(
+  () => postModal.isOpen.value,
+  (open) => {
+    if (open || !import.meta.client) return;
+    // 等弹窗离场动画（~200ms）结束后再重建 list，避免卡到关闭动画
+    window.setTimeout(flushPendingReadIds, 320);
+  },
+);
+
+const handleRefresh = async () => {
+  if (disposed || refreshing.value || loading.value || applyingNewArticles.value) return;
+  const pendingBatch = feedUpdates.snapshot();
+  feedUpdates.clearHighlight();
+  refreshing.value = true;
+  window.scrollTo({ top: 0, behavior: "instant" });
+  // Minimum visible duration so the animation feels intentional
+  const minDelay = new Promise((r) => setTimeout(r, 600));
+  // 用户明确下拉刷新：跳过 staleTime 缓存，强制重拉最新首页列表
+  api.invalidateQueries(["articles", "search"]);
+  if (await fetchList(true)) feedUpdates.acknowledge(pendingBatch);
+  await minDelay;
+  refreshing.value = false;
+};
+
+// ── 后台静默轮询：按活动时间跨页对账，补齐断线期间的新帖/顶帖 ────
+const pollLatestArticles = async () => {
+  // 仅在主信息流（无搜索词、非关注/收藏）下做轮询
+  if (feedMode.value !== "all") return;
+  if (query.value.trim()) return;
+  // 活动时间边界只适用于最新流；热门榜和未看流不按 bumpedAt 对账，仅接收 SSE。
+  if (activeSort.value !== "latest") return;
+  // 不与正在进行的请求/刷新冲突
+  if (disposed || polling || listRequestPending || refreshing.value || applyingNewArticles.value) return;
+  if (import.meta.client && document.visibilityState !== "visible") return;
+  // 列表还没加载出来时不必探测
+  if (!hasSettledPage || !list.value.length) return;
+
+  polling = true;
+  const currentVersion = requestVersion.value;
+  try {
+    // 跨页对账也要取新数据，因此失效当前频道的列表缓存。
+    api.invalidateQueries(["articles", "search", "", selectedCategory.value]);
+    const category = selectedCategory.value;
+    await feedUpdates.reconcile(
+      (cursor) => api.searchArticles("", cursor, category, "all", "latest"),
+      () => !disposed && currentVersion === requestVersion.value,
+    );
+  } catch {
+    // 网络错误静默忽略：下次轮询再试
+  } finally {
+    polling = false;
+  }
+};
+
+const startPolling = () => {
+  if (disposed || pollTimer) return;
+  pollTimer = setInterval(() => {
+    void pollLatestArticles();
+  }, NEW_ARTICLES_POLL_MS);
+};
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+};
+
+// 查看更新只插入这批卡片，旧列表的 endCursor / hasNextPage 保持不变。
+const applyNewArticles = async () => {
+  if (disposed || applyingNewArticles.value || listRequestPending || refreshing.value || !hasNewArticles.value) return;
+  // 作废已发出的轮询结果，避免它在本批次加载后重新提示同一批更新。
+  requestVersion.value++;
+  await feedUpdates.apply();
+  await nextTick();
+  if (!disposed) observeLoadMoreSentinel();
+};
+
+// Tab 回到前台：立即跳一次轮询，让用户尽快看到提示
+const onTabVisible = () => {
+  void pollLatestArticles();
+};
+
+// 三种排序都计入新帖与旧帖的新回复；最新流额外通过 bumpedAt 轮询补齐漏推。
+useArticleFeedStream({
+  enabled: feedStreamEnabled,
+  category: selectedCategory,
+  onTopicEvent: feedUpdates.enqueue,
+});
+
+const doLoadMore = () => {
+  if (disposed || listRequestPending || applyingNewArticles.value || !hasNextPage.value) return;
+  fetchList(false).catch(() => undefined);
+};
+
+const observeLoadMoreSentinel = () => {
+  if (disposed || !import.meta.client) return;
+
+  loadMoreObserverRef.value?.disconnect();
+  loadMoreObserverRef.value = null;
+
+  const sentinel = loadMoreSentinelRef.value;
+  if (!sentinel) return;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        doLoadMore();
+      }
+    },
+    {
+      root: null,
+      rootMargin: LOAD_MORE_ROOT_MARGIN,
+      threshold: 0,
+    },
+  );
+
+  observer.observe(sentinel);
+  loadMoreObserverRef.value = observer;
+};
+
+const debouncedSearch = useDebounceFn(() => fetchList(true), 300);
+
+watch(
+  () => query.value,
+  (q) => {
+    // 输入搜索词时回到主信息流（关注/收藏不支持文本搜索）。
+    // feedMode 变化会触发其 watcher 重拉，避免与 debouncedSearch 重复，这里提前 return。
+    if (q.trim() && feedMode.value !== "all") {
+      feedMode.value = "all";
+      stopPolling();
+      return;
+    }
+    debouncedSearch();
+    // q 非空 ⇒ 进入搜索；空 ⇒ 回到主信息流（轮询照常运行）
+    if (q.trim()) {
+      stopPolling();
+    } else {
+      startPolling();
+    }
+  },
+);
+
+watch(
+  () => route.query.q,
+  (nextQuery) => {
+    const normalized = pickFirstQuery(nextQuery as string | string[] | undefined);
+    if (normalized === query.value) return;
+    query.value = normalized;
+  },
+);
+
+const selectCategory = (slug: string) => {
+  // 选分类即回到主信息流（关注/收藏是独立筛选，不与分类叠加）。
+  if (feedMode.value !== "all") feedMode.value = "all";
+  // 频道保留最新/未看选择；热门仍是全站榜单，进入频道时改用最新。
+  if (sortMode.value === "hot") sortMode.value = "latest";
+  if (slug === selectedCategory.value) return;
+  selectedCategory.value = slug;
+};
+
+// 缓存恢复时同步 feedMode / sortMode 会触发下面的 watcher；用此标记跳过那次重拉。
+let skipFeedWatch = false;
+
+// 切换频道、feed 或排序：清空"新委托提示"、重置分页并强制失效缓存后重拉首屏，
+// 确保即使命中旧缓存也会真正打到后端、列表随之刷新。
+// 合并 feedMode + selectedCategory + sortMode 为单个 watcher：切 feed 时常会同时改
+// 这几个值（见 selectFeed / selectCategory），合并后同一 flush 周期只触发一次，避免
+// 多个独立 watcher 各自 ++requestVersion 互相作废导致 fetchList 提前 return、列表不刷新。
+watch(
+  () => [feedMode.value, selectedCategory.value, sortMode.value] as const,
+  () => {
+    if (skipFeedWatch) {
+      skipFeedWatch = false;
+      return;
+    }
+    endCursor.value = "";
+    hasNextPage.value = true;
+    requestVersion.value++;
+    api.invalidateQueries(["articles", "search"]);
+    void fetchList(true);
+  },
+);
+
+// 登录/退出/切账号后，旧身份的列表和在途请求都作废。generation 不随正常续期变化，
+// 因此续期不会打断浏览，也不再依赖可能因 loading 被忽略的 home-refresh 事件。
+watch(
+  () => auth.generation,
+  () => {
+    // 身份切换入口已同步清缓存；这里再 clear 会取消新身份刚发出的用户资料请求。
+    homeStateCache.clear();
+    pendingReadIds.clear();
+    unsettledReadIds.clear();
+    list.value = [];
+    cachedMeasuredHeights.value = undefined;
+    seenIds = new Set();
+    enterAnimationIds.value = new Set();
+    endCursor.value = "";
+    hasNextPage.value = true;
+    if (!auth.isLogin && feedMode.value !== "all") {
+      skipFeedWatch = true;
+      feedMode.value = "all";
+    }
+    // 只改当前档、不写 localStorage：重新登录后进站仍回到用户选的「未看」。
+    if (!auth.isLogin && sortMode.value === "unread") {
+      skipFeedWatch = true;
+      sortMode.value = "latest";
+    }
+    void fetchList(true);
+  },
+);
+
+const loadCategories = async () => {
+  try {
+    const list = await api.getCategories();
+    if (list.length) categories.value = list;
+  } catch {
+    // 频道列表拉取失败不影响主信息流浏览
+  }
+};
+void loadCategories();
+
+watch(
+  () => loadMoreSentinelRef.value,
+  async () => {
+    await nextTick();
+    observeLoadMoreSentinel();
+  },
+  { flush: "post" },
+);
+
+// ── 缓存恢复 / 首次加载 ─────────────────────────────
+// scrollY 的恢复由 app/router.options.ts 的 scrollBehavior 在导航阶段统一处理，
+// 此处只负责列表数据 + measuredHeights 的恢复。
+const cached = homeStateCache.restore();
+let initialFetchPromise: Promise<unknown>;
+
+// 乐观插入：消费 /create 发布后塞入的 pending 队列，把刚发布的委托
+// unshift 到 list 头部并加入 seenIds，避免后续 fetch 返回相同 id 时被去重逻辑过滤掉。
+// 搜索流 / 关注 / 收藏 feed / 热门排序下不插入，避免污染这些列表（新委托既未被收藏、
+// 未必来自关注作者，也不会一发布就进热度榜）。
+// drain 仅在真正会写入 list 时调用，不能在冷启动 fetchList 之前就 drain——fetchList 会重置 seenIds 和 list。
+const consumePendingPosts = () => {
+  if (disposed) return;
+  if (feedMode.value !== "all") return;
+  if (query.value.trim()) return;
+  if (activeSort.value === "hot") return;
+  if (!pendingPost.peek().length) return;
+  const pending = pendingPost.drain();
+  // 反转后再 unshift：保证 push 顺序最晚的委托排在最顶部
+  const fresh: Post[] = [];
+  for (const post of pending) {
+    if (!post.id || seenIds.has(post.id)) continue;
+    seenIds.add(post.id);
+    fresh.push(post);
+  }
+  if (!fresh.length) return;
+  fresh.reverse();
+  list.value = [...fresh, ...list.value];
+};
+
+if (cached && cached.query === query.value && cached.category === selectedCategory.value) {
+  // 从缓存恢复：跳过网络请求，直接填充列表状态
+  const restoredFeed = cached.feed ?? "all";
+  if (restoredFeed !== feedMode.value) {
+    skipFeedWatch = true;
+    feedMode.value = restoredFeed;
+  }
+  // 快照里的档位优先于 localStorage 里的默认档：切换频道可能改变当前排序，
+  // 但不会覆盖全站默认档（见 selectCategory），两者会分叉。
+  // 回到首页要还原用户离开时正在看的那条流，不是他记下的默认档。
+  const restoredSort = cached.sort;
+  if (restoredSort !== sortMode.value) {
+    skipFeedWatch = true;
+    sortMode.value = restoredSort;
+  }
+  list.value = api.mergeReadStatus(cached.list);
+  hasSettledPage = true;
+  endCursor.value = cached.endCursor;
+  hasNextPage.value = cached.hasNextPage;
+  seenIds = cached.seenIds;
+  cachedMeasuredHeights.value = cached.measuredHeights;
+  feedUpdates.seedPollingBaseline(cached.list);
+  if (cached.reconciledBump !== undefined) feedUpdates.reconciledBump.value = cached.reconciledBump;
+  for (const id of cached.pendingArticleIds ?? []) feedUpdates.enqueue(id);
+  // scrollY 由 router.options.ts 的 scrollBehavior 通过 consumeScrollY() 独立消费
+  homeStateCache.clear();
+  initialFetchPromise = Promise.resolve();
+  // 缓存命中：list 已就绪，立即消费 pending 队列，首帧渲染即可看到刚发的委托
+  consumePendingPosts();
+} else {
+  homeStateCache.clear();
+  // 在 setup 阶段提前发起首屏数据请求，不等 onMounted
+  initialFetchPromise = fetchList(true);
+  // 冷启动路径下，consumePendingPosts 推迟到 fetchList resolve 之后（onMounted 中），
+  // 因为 fetchList 会重置 seenIds 和 list，提前 drain 会丢失数据。
+}
+
+// Triggered by MobileBottomNav when the user double-taps the active
+// "推送" entry — mirrors the Flutter app's pull-to-refresh shortcut.
+const onHomeRefreshEvent = () => {
+  void handleRefresh();
+};
+
+// ── 移动端下拉刷新（touch-based pull-to-refresh） ─────────────
+const PULL_THRESHOLD = 60;
+const PULL_MAX = 120;
+let pullStartX = 0;
+let pullStartY = 0;
+let isPulling = false;
+// 手势方向已锁定：一旦判定为横向滑动就不再干预，避免反复检测。
+let pullDirectionLocked = false;
+const pullDistance = ref(0);
+const pullTriggered = ref(false);
+
+// 动态注册 non-passive touchmove：仅在下拉条件满足时激活，
+// 避免全局 non-passive 监听器阻塞浏览器滚动优化。
+const onPullTouchMove = (e: TouchEvent) => {
+  if (!isPulling) return;
+  const touch = e.touches[0];
+  if (!touch) return;
+  const deltaX = Math.abs(touch.clientX - pullStartX);
+  const deltaY = touch.clientY - pullStartY;
+
+  // 手势方向判定：横向位移占主导时放弃下拉刷新，让浏览器处理原生横向滚动
+  // （如分类标签栏左右滑动）。阈值 8px 过滤抖动。
+  if (!pullDirectionLocked && deltaX > 8 && deltaX > Math.abs(deltaY)) {
+    isPulling = false;
+    pullDirectionLocked = true;
+    detachPullMove();
+    pullDistance.value = 0;
+    pullTriggered.value = false;
+    return;
+  }
+
+  if (deltaY < 0) {
+    pullDistance.value = 0;
+    return;
+  }
+  // 页面在顶部且下拉中：阻止浏览器默认 overscroll/bounce 行为，
+  // 确保自定义下拉刷新手势不被原生行为覆盖。
+  if (deltaY > 0 && window.scrollY <= 0) {
+    e.preventDefault();
+  }
+  const dampened = Math.min(PULL_MAX, deltaY * 0.4);
+  pullDistance.value = dampened;
+  pullTriggered.value = dampened >= PULL_THRESHOLD;
+};
+
+const attachPullMove = () => {
+  window.addEventListener("touchmove", onPullTouchMove, { passive: false });
+};
+const detachPullMove = () => {
+  window.removeEventListener("touchmove", onPullTouchMove);
+};
+
+const onTouchStart = (e: TouchEvent) => {
+  if (!isMobile.value || refreshing.value || loading.value) return;
+  // 弹窗/覆盖层打开时：下拉属于覆盖层自身手势，不应触发首页刷新
+  if (document.querySelector(".ik-overlay")) return;
+  // 分区下拉等列表浮层内的点按/滑动同理；reka 的 SelectItem 还会在 touchend 上 stopPropagation，
+  // 若在这里开始跟踪，window 收不到 touchend，下拉指示器会残留在屏幕上。
+  if ((e.target as Element | null)?.closest?.("[role='listbox']")) return;
+  if (window.scrollY > 5) return;
+  const touch = e.touches[0];
+  if (!touch) return;
+  pullStartX = touch.clientX;
+  pullStartY = touch.clientY;
+  isPulling = true;
+  pullDirectionLocked = false;
+  // 仅在可能触发下拉时注册 non-passive touchmove，不影响其余正常滚动
+  attachPullMove();
+};
+
+const onTouchEnd = () => {
+  if (!isPulling) return;
+  isPulling = false;
+  detachPullMove();
+  if (pullTriggered.value && !refreshing.value && !document.querySelector(".ik-overlay")) {
+    void handleRefresh();
+  }
+  pullDistance.value = 0;
+  pullTriggered.value = false;
+};
+
+const onTouchCancel = () => {
+  if (!isPulling) return;
+  isPulling = false;
+  detachPullMove();
+  pullDistance.value = 0;
+  pullTriggered.value = false;
+};
+
+// 乐观删除：委托详情页/弹窗删除成功后，从首页列表中移除
+const onArticleDeleted = (e: Event) => {
+  const deletedId = (e as CustomEvent<string>).detail;
+  if (!deletedId) return;
+  list.value = list.value.filter((d) => d.id !== deletedId);
+  seenIds.delete(deletedId);
+};
+
+onMounted(async () => {
+  if (import.meta.client) {
+    window.addEventListener("ik:home-refresh", onHomeRefreshEvent);
+    window.addEventListener("ik:tab-visible", onTabVisible);
+    window.addEventListener("ik:article-deleted", onArticleDeleted);
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchend", onTouchEnd);
+    window.addEventListener("touchcancel", onTouchCancel);
+  }
+  await initialFetchPromise;
+  if (disposed) return;
+  // 注册 pending 队列 watch（immediate=true）：
+  //   - 冷启动：fetchList 刚填好 list，immediate 触发立即消费当前 pending；
+  //   - 迟到 push：/create 的 fire-and-forget getPost 可能晚于此点解析，
+  //     watch 会在 push 时再次触发消费，避免乐观委托被丢；
+  //   - 缓存命中路径下队列已在 setup 中 drain，immediate 触发是 no-op。
+  stopPendingWatch = watch(
+    pendingPost.queue,
+    () => consumePendingPosts(),
+    { immediate: true },
+  );
+  await nextTick();
+  if (disposed) return;
+  observeLoadMoreSentinel();
+
+  // 滚动恢复由 app/router.options.ts 的 scrollBehavior 统一处理，
+  // 此处无需手动 scrollTo——scrollBehavior 在导航到 / 时自动读取缓存的 scrollY。
+
+  // 仅在主信息流下启动轮询；搜索状态由 watch(query) 控制
+  if (!query.value.trim()) startPolling();
+});
+
+// ── 路由离开前：保存首页状态快照 ──────────────────────
+// onBeforeRouteLeave 在路由变化前触发，此时 DOM 完整无损，window.scrollY 精确。
+// 配合 measuredHeights 缓存，重建后布局像素级一致，scrollY 即可精确恢复。
+onBeforeRouteLeave(() => {
+  // 未完成/失败的首屏不能作为空列表快照恢复；成功返回的空页则照常缓存。
+  if (!hasSettledPage) {
+    homeStateCache.reset();
+    return;
+  }
+  const heights = masonryRef.value?.measuredHeights;
+  homeStateCache.save({
+    list: api.mergeReadStatus(list.value.map((post) =>
+      unsettledReadIds.has(post.id) && post.isRead ? { ...post, isRead: false } : post,
+    )),
+    endCursor: endCursor.value,
+    hasNextPage: hasNextPage.value,
+    query: query.value,
+    category: selectedCategory.value,
+    feed: feedMode.value,
+    sort: sortMode.value,
+    reconciledBump: feedUpdates.reconciledBump.value,
+    pendingArticleIds: [...newArticleIds.value],
+    seenIds,
+    measuredHeights: heights ? new Map(heights) : new Map(),
+    scrollY: window.scrollY,
+  });
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  requestVersion.value++;
+  if (import.meta.client) {
+    window.removeEventListener("ik:home-refresh", onHomeRefreshEvent);
+    window.removeEventListener("ik:tab-visible", onTabVisible);
+    window.removeEventListener("ik:article-deleted", onArticleDeleted);
+    window.removeEventListener("touchstart", onTouchStart);
+    window.removeEventListener("touchend", onTouchEnd);
+    window.removeEventListener("touchcancel", onTouchCancel);
+    detachPullMove();
+    if (scrollBridge) {
+      window.removeEventListener("scroll", scrollBridge);
+      scrollBridge = null;
+    }
+  }
+  if (stopPendingWatch) {
+    stopPendingWatch();
+    stopPendingWatch = null;
+  }
+  stopPolling();
+  loadMoreObserverRef.value?.disconnect();
+  loadMoreObserverRef.value = null;
+});
+</script>
+
+<template>
+  <section class="ik-home-container ik-stack">
+    <!-- 移动端下拉刷新指示器 -->
+    <div
+      v-if="pullDistance > 0 || refreshing"
+      class="ik-pull-indicator"
+      :style="{ opacity: refreshing ? 1 : Math.min(1, pullDistance / PULL_THRESHOLD), transform: `translateX(-50%) translateY(${refreshing ? 0 : pullDistance - PULL_THRESHOLD}px) rotate(${pullDistance * 3}deg)` }"
+    >
+      <i class="z-icon-loading ik-refresh-spin" />
+    </div>
+
+    <!-- Refresh indicator (pull-to-refresh style) -->
+    <Transition name="ik-refresh-indicator">
+      <div v-if="refreshing" class="ik-refresh-indicator ik-refresh-indicator--desktop">
+        <i class="z-icon-loading ik-refresh-spin" />
+      </div>
+    </Transition>
+
+    <HomeAccountTools />
+    <TerminalMasthead />
+
+    <!-- 顶部导航控制台：基于 shadcn-vue / reka-ui 的 Tabs（委托流）与 Select（分区筛选） -->
+    <HomeFeedNavigation
+      :model-value="currentTab"
+      :category="selectedCategory"
+      :categories="categories"
+      :searching="isSearching"
+      @update:model-value="handleTabChange"
+      @update:category="(val: string) => (val === '' ? selectAllCategories() : selectCategory(val))"
+    >
+      <div class="ik-feed-updates" aria-live="polite" aria-atomic="true">
+        <Transition name="ik-new-articles-pill" mode="out-in">
+          <button
+            v-if="hasNewArticles && !refreshing"
+            class="ik-new-articles-pill"
+            type="button"
+            :disabled="applyingNewArticles || loading || loadingMore"
+            :aria-busy="applyingNewArticles"
+            @click="applyNewArticles"
+          >
+            <ArrowPathIcon
+              class="ik-new-articles-pill-icon"
+              :class="{ 'ik-refresh-spin': applyingNewArticles }"
+              aria-hidden="true"
+            />
+            <span v-if="applyingNewArticles">正在加载更新…</span>
+            <span v-else>查看 {{ newArticleIds.length }} 条新的或更新的帖子</span>
+          </button>
+          <div
+            v-else-if="updateAnnouncement && !refreshing"
+            class="ik-new-articles-pill ik-new-articles-pill--status"
+            role="status"
+          >{{ updateAnnouncement }}</div>
+        </Transition>
+      </div>
+
+      <ClientOnly>
+        <Transition name="ik-list-fade" mode="out-in">
+          <!-- 骨架屏：loading=true 且 list 为空时显示 -->
+          <div
+            v-if="!list.length && loading"
+            key="skeleton"
+            class="ik-skeleton-state"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <span class="ik-sr-only">正在加载委托...</span>
+            <VirtualMasonry
+              class="ik-masonry"
+              :items="skeletonItems"
+              :column-width="240"
+              :gap="feedGap"
+              :min-columns="2"
+              :max-columns="6"
+              :key-mapper="skeletonKeyMapper"
+              :height-mapper="estimateSkeletonHeight"
+              :measure-items="false"
+            >
+              <template #default="{ item }">
+                <PostCardSkeleton :skeleton="item" />
+              </template>
+            </VirtualMasonry>
+          </div>
+
+          <!-- 空状态：loading=false 且 list 为空时显示 -->
+          <div v-else-if="!list.length && !loading && !hasNextPage" key="empty" class="ik-empty">
+            {{ isUnreadFeed ? "委托都看完啦，暂时没有未看的... [ o_x ]/" : "暂无相关委托... [ o_x ]/" }}
+          </div>
+
+          <!-- 实际内容：list 不为空时显示 -->
+          <div v-else key="list" class="ik-list-state">
+            <VirtualMasonry
+              ref="masonryRef"
+              class="ik-masonry"
+              :items="list"
+              :column-width="240"
+              :gap="feedGap"
+              :min-columns="2"
+              :max-columns="6"
+              :buffer="1800"
+              :estimated-height="300"
+              :height-mapper="estimatePostCardHeight"
+              :key-mapper="masonryKeyMapper"
+              :initial-heights="cachedMeasuredHeights"
+            >
+              <template #default="{ item, index, columnCount }">
+                <PostCard
+                  :class="{ 'ik-masonry-card-enter': shouldAnimatePost(item.id) }"
+                  :style="shouldAnimatePost(item.id) ? getStaggerDelayStyle(index, columnCount) : undefined"
+                  :post="item"
+                  :highlighted="highlightedArticleIds.has(item.id)"
+                  :eager="index < columnCount * 2"
+                  :data-post-id="item.id"
+                  @open="goPost"
+                  @animationend="onCardAnimationEnd"
+                />
+              </template>
+            </VirtualMasonry>
+
+            <div ref="loadMoreSentinelRef" class="ik-load-more-sentinel">
+              <div v-if="loadingMore || !hasNextPage" class="ik-scroll-footer">
+                <img v-if="loadingMore" class="ik-scroll-gif" src="/images/Bangboo.gif" alt="加载中" />
+                <span v-else class="ik-meta">已经到底啦 [ O_X ] /</span>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </ClientOnly>
+    </HomeFeedNavigation>
+    <!-- Refresh FAB (hidden on mobile) -->
+    <z-button
+      circle
+      class="ik-refresh-fab"
+      :loading="refreshing"
+      :disabled="applyingNewArticles"
+      @click="handleRefresh"
+    >
+      <ArrowPathIcon v-if="!refreshing" style="width:1em;height:1em" />
+    </z-button>
+    <z-backtop class="ik-backtop" :target="scrollTarget" :right="32" :bottom="95" />
+  </section>
+</template>
+
+<style scoped>
+.ik-home-container {
+  position: relative;
+  width: min(1600px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+/* 内容层抬到全局背景跑马灯之上（固定定位的刷新/回顶按钮本就在更高层级） */
+.ik-home-toolbar,
+.ik-skeleton-state,
+.ik-empty,
+.ik-list-state {
+  position: relative;
+  z-index: 1;
+}
+
+.ik-masonry {
+  width: 100%;
+}
+
+.ik-masonry-card-enter {
+  animation: ik-masonry-card-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+@keyframes ik-masonry-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ik-masonry-card-enter {
+    animation: none;
+  }
+}
+
+
+.ik-skeleton-state {
+  width: 100%;
+}
+
+/* 骨架屏 ↔ 真实列表 ↔ 空状态 之间的淡入淡出过渡 */
+.ik-list-fade-enter-active,
+.ik-list-fade-leave-active {
+  transition: opacity 220ms ease;
+}
+
+.ik-list-fade-enter-from,
+.ik-list-fade-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ik-list-fade-enter-active,
+  .ik-list-fade-leave-active {
+    transition: none;
+  }
+}
+
+.ik-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ik-load-more-sentinel {
+  width: 100%;
+  min-height: 1px;
+}
+
+.ik-scroll-footer {
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.ik-scroll-gif {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+}
+
+@media (max-width: 1400px) {
+  .ik-home-container {
+    width: calc(100% - 32px);
+  }
+}
+
+@media (max-width: 768px) {
+  .ik-home-container {
+    width: calc(100% - 28px);
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .ik-scroll-footer {
+    flex-wrap: wrap;
+  }
+}
+/* ── Refresh indicator (pull-to-refresh style) ── */
+.ik-refresh-indicator {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 44px;
+  background: transparent;
+  border: none;
+  color: #BFFF09;
+  font-size: 24px;
+  pointer-events: none;
+}
+
+.ik-refresh-spin {
+  animation: ik-spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes ik-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ik-refresh-indicator-enter-active {
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease;
+}
+
+.ik-refresh-indicator-leave-active {
+  transition: transform 250ms cubic-bezier(0.55, 0, 1, 0.45), opacity 200ms ease;
+}
+
+.ik-refresh-indicator-enter-from,
+.ik-refresh-indicator-leave-to {
+  transform: translate(-50%, -15px);
+  opacity: 0;
+}
+
+.ik-refresh-fab {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 100;
+  width: 28px !important;
+  height: 28px !important;
+  font-size: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.ik-refresh-fab :deep(.z-button__content:empty) {
+  display: none;
+}
+
+.ik-refresh-fab :deep(.z-button__icon) {
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%);
+}
+
+.ik-refresh-fab :deep(.z-button__icon.is-loading) {
+  animation: ik-fab-spin 1.5s linear infinite;
+}
+
+@keyframes ik-fab-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* 刷新按钮加载状态优化 */
+.ik-refresh-fab :deep(.z-button__icon.is-loading) {
+  will-change: transform;
+}
+
+/* Avoid overlap with the fixed MobileBottomNav (58px) — shown on screens ≤1100px */
+@media (max-width: 1100px) {
+  .ik-refresh-fab {
+    right: 16px;
+    bottom: calc(58px + 16px + env(safe-area-inset-bottom, 0px));
+  }
+  :deep(.z-backtop) {
+    right: 16px !important;
+    bottom: calc(58px + 16px + 56px + 12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .ik-refresh-fab,
+  .ik-backtop {
+    display: none !important;
+  }
+
+  :deep(.z-backtop) {
+    display: none !important;
+  }
+
+  .ik-refresh-indicator--desktop {
+    display: none;
+  }
+}
+
+.ik-pull-indicator {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(30, 30, 30, 0.9);
+  color: #bfff09;
+  font-size: 18px;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+@media (min-width: 769px) {
+  .ik-pull-indicator {
+    display: none;
+  }
+}
+
+/* ── 新委托提示药丸按钮 ───────────────────────── */
+.ik-feed-updates {
+  position: absolute;
+}
+
+.ik-new-articles-pill {
+  position: fixed;
+  top: calc(78px + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: #BFFF09;
+  color: #000;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+  cursor: var(--ik-cursor-pointer);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.6) inset;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.ik-new-articles-pill:disabled {
+  cursor: progress;
+}
+
+.ik-new-articles-pill--status {
+  pointer-events: none;
+}
+
+.ik-new-articles-pill:hover {
+  background: #e8ff44;
+  transform: translateX(-50%) translateY(-1px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.6) inset;
+}
+
+.ik-new-articles-pill:active {
+  transform: translateX(-50%) translateY(0);
+}
+
+.ik-new-articles-pill-icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+}
+
+.ik-new-articles-pill-enter-active,
+.ik-new-articles-pill-leave-active {
+  transition: opacity 220ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ik-new-articles-pill-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-12px);
+}
+
+.ik-new-articles-pill-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+@media (max-width: 768px) {
+  .ik-new-articles-pill {
+    top: calc(78px + 8px);
+    padding: 7px 14px;
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ik-new-articles-pill,
+  .ik-new-articles-pill-enter-active,
+  .ik-new-articles-pill-leave-active {
+    transition: none;
+  }
+}
+</style>
