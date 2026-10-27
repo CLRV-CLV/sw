@@ -1601,7 +1601,7 @@ const handleMobileBack = () => {
                 <IkZzzMarquee />
                 <!-- 左栏：tab + 会话列表 + 活动信息 -->
                 <aside class="ik-knock__sidebar">
-                  <NuxtLink to="/messages" style="display:block;padding:12px;color:#d7fa00">通讯录 / 新建私聊 →</NuxtLink>
+                  <NuxtLink to="/messages" style="display:block;padding:12px;color:#d7fa00">通讯录 / 群聊 / 文件 →</NuxtLink>
                   <div class="ik-knock__tabs" role="tablist" aria-label="敲敲分类">
                     <button
                       type="button"

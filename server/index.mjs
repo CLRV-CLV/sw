@@ -66,18 +66,13 @@ const publicUser = (u) => ({
   avatarUrl: profiles.get(u.id).avatarUrl || (["avatar-nicole", "avatar-anby", "avatar-billy"].includes(u.avatarSlug) ? `/images/agent-${u.avatarSlug.slice(7)}.webp` : `/media/avatar/${u.avatarSlug || "avatar-bangboo"}.svg`),
 });
 const fail = (status, detail) => Object.assign(new Error(detail), { status });
-async function body(req) {
-  let text = "";
-  for await (const c of req) {
-    text += c;
-    if (Buffer.byteLength(text) > 1048576) throw fail(413, "请求过大");
-  }
-  try {
-    return JSON.parse(text || "{}");
-  } catch {
-    throw fail(400, "无效 JSON");
-  }
+async function body(req,limit=1048576) {
+  const chunks=[];let size=0;
+  for await(const c of req){size+=c.length;if(size>limit)throw fail(413,"请求过大");chunks.push(c);}
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}
+  catch{throw fail(400,"无效 JSON");}
 }
+
 const sockets = new WebSocketServer({ noServer: true, maxPayload: 16384 });
 const broadcast = (t, d) => {
   for (const ws of sockets.clients)
@@ -164,7 +159,7 @@ const app = http.createServer(async (req, res) => {
       return user;
     };
     if (await admin.handler({ path, req, url, auth, body, reply })) return;
-    if (await messenger.handler({ path, req, url, auth, body, reply })) return;
+    if (await messenger.handler({ path, req, url, auth, body, reply, fileReply(bytes,a){res.writeHead(200,{'content-type':a.mime,'content-length':bytes.length,'content-disposition':`${a.type==='image'||a.type==='audio'?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(a.name).replace(/'/g,'%27')}`,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"});res.end(bytes);} })) return;
     if (await connections({ path, req, res, url, auth, reply })) return;
     if (path === '/v1/site' && req.method === 'GET') { const {siteTitle,siteIcon,siteBackground,backgroundColor}=admin.settings();return reply({siteTitle,siteIcon,siteBackground,backgroundColor}); }
     if (path === "/health") return reply({ ok: true });

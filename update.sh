@@ -81,7 +81,7 @@ if [[ "$RESTART" != none && "$HAS_PM2" == 1 ]]; then
   pm2 restart "$APP" --update-env
   echo "Updated and restarted $APP. Verify your domain and /health."
 else
-  echo 'Build complete. Restart this project in BaoTa Node project manager (do not start a second process on port 3000).'
+  echo 'Build complete. Restart this project in BaoTa Node project manager (do not start a second process on the existing project PORT).'
 fi
 echo "Updated $OLD -> $(git rev-parse HEAD), source branch: $BRANCH"
 echo 'Database preserved. Backup contains DB/.env only; back up any custom media directories separately.'

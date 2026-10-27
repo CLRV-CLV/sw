@@ -88,7 +88,8 @@ npm start
 location / {
     proxy_pass http://127.0.0.1:3000;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
+    client_max_body_size 8m;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -98,7 +99,7 @@ location / {
 }
 ```
 
-保留Host，避免同源写请求被拒绝。若使用非默认端口域名，Host应保留实际端口（例如 `$http_host`）。上面是location示意，不要把它直接覆盖进完整server配置；先用宝塔/Nginx配置测试。
+使用`$http_host`保留浏览器的实际Host和端口，避免HTTPS同源写入被拒绝；不要拼接`$host:$server_port`。附件通过JSON传输，5MB文件会被base64扩为约6.7MB，所以Nginx需要至少`client_max_body_size 8m`。上面是location示意，不要把它直接覆盖进完整server配置；先用宝塔/Nginx配置测试。
 
 不要将Git仓库根目录作为可公开读取的静态目录，尤其不能开放`.env`、`server/data`、`.git`、`backups`。防火墙不向公网开放3000，只开放80/443。Node虽监听0.0.0.0，公网应经Nginx访问。
 
@@ -172,3 +173,23 @@ npm run build:web --prefix server
 用`&&`保证安装失败后不继续构建。无需删除数据库、.env或package-lock.json。`nuxt: command not found`通常是前端依赖安装失败，或生产环境省略了开发依赖；构建时明确`--include=dev`。无需全局安装nuxt。
 
 如官方npm源在服务器网络无法访问，可自行选择可信的npm包镜像（例如`https://registry.npmmirror.com/`），而不是Node二进制镜像目录；设置`NPM_REGISTRY`可覆盖update.sh所用包源。项目不保证第三方镜像的可达性和同步进度。安装日志显示的Node26并非本项目推荐的22.x部署环境，建议同时在宝塔与SSH终端切换到22.22+的22.x版本。
+
+### 已部署到5385端口的项目
+
+上面的3000是首次部署示例。若现有项目使用`PORT=5385`和反代`127.0.0.1:5385`，**保持5385，不要因为更新改成3000**。在`/www/wwwroot/sw`执行：
+
+```sh
+node -v  # 建议22.22+，并确保宝塔项目与SSH使用兼容的Node版本
+bash ./update.sh --restart none
+```
+
+成功后在宝塔Node项目管理里重启现有项目，再执行：
+
+```sh
+curl -fsS http://127.0.0.1:5385/health
+git rev-parse --short HEAD
+```
+
+`/health`应返回`{"ok":true}`。重新打开站点并硬刷新，进入`/web/messages`（手机`/h5/messages`）验证好友和群聊。新表/字段由服务启动时自动增加，无需清库或重新注册；备份目录由脚本输出。若出现本地修改拒绝更新，先用`git status --short`审查，勿直接强制重置或删除数据目录。
+
+本轮附件保存在SQLite内，更新脚本的在线数据库备份包含附件；未来若改用外部对象存储则需要单独备份策略。录音需HTTPS和浏览器麦克风授权，语音消息不等于实时语音通话。
