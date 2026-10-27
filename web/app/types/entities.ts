@@ -1,0 +1,739 @@
+export interface Author {
+  id?: string | number;
+  documentId?: string;
+  authorId?: string;
+  username?: string;
+  login?: string;
+  name?: string;
+  email?: string;
+  avatar?: string;
+  exp?: number;
+  level?: number;
+  /** 自身资料中的丁尼余额；旧后端未提供时保持 undefined。 */
+  denny?: number;
+  isAiAgent?: boolean;
+  /** 是否为管理员（仅当前用户的资料有）。 */
+  isAdmin?: boolean;
+  /** 是否已通过入站考试（仅当前用户的资料有）。 */
+  examPassed?: boolean;
+}
+
+/** 账号安全概览（/v1/me/security） */
+export interface AccountSecurity {
+  email: string;
+  provider: "mihoyo" | "local";
+  hasBoundEmail: boolean;
+  hasPassword: boolean;
+}
+
+/** 已登录设备与会话（/v1/me/sessions） */
+export interface AuthSessionItem {
+  id: string;
+  deviceId?: string | null;
+  userAgent?: string | null;
+  ip?: string;
+  location?: string | null;
+  loginMethod?: "password" | "mihoyo" | "email_code" | "register" | "password_change" | "password_reset" | "oauth" | null;
+  loginAt?: string | null;
+  isCurrent?: boolean;
+  lastSeenAt: string | null;
+  createdAt?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface DailyExpSource {
+  done: boolean;
+  exp: number;
+}
+
+export interface DailyExpStatus {
+  todaySelfGained: number;
+  todaySelfCap: number;
+  sources: {
+    checkIn: DailyExpSource;
+    createArticle: DailyExpSource;
+    createComment: DailyExpSource;
+    likeGive: DailyExpSource;
+  };
+}
+
+/** 入站考试题目选项 */
+export interface ExamOption {
+  key: string;
+  text: string;
+}
+
+/** 入站考试题目（不含答案，服务端判分） */
+export interface ExamQuestion {
+  questionId: string;
+  question: string;
+  type: "single" | "multiple" | "boolean";
+  options: ExamOption[];
+  weight: number;
+}
+
+export interface ExamConfig {
+  questionCount: number;
+  passScorePercent: number;
+  timeLimitSeconds: number;
+  maxFailsBeforeCooldown: number;
+  failCooldownSeconds: number;
+  rewardDenny: number;
+  rewardExp: number;
+}
+
+export interface ExamStatus {
+  passed: boolean;
+  passedAt: string | null;
+  cooldownRemaining?: number;
+  activeAttempt?: {
+    attemptId: string;
+    startedAt: string;
+    expiresAt: string;
+    questionCount: number;
+  } | null;
+  config: ExamConfig;
+}
+
+export interface ExamStartResult {
+  attemptId: string;
+  resumed: boolean;
+  startedAt: string;
+  expiresAt: string;
+  questions: ExamQuestion[];
+  config: ExamConfig;
+}
+
+export interface ExamSubmitResult {
+  passed: boolean;
+  score: number;
+  totalScore: number;
+  scorePercent: number;
+  correctCount: number;
+  questionCount: number;
+  passScorePercent: number;
+  cooldownRemaining: number;
+  reward: { denny: number; exp: number } | null;
+}
+
+/** 入站考试错题回顾单题 */
+export interface ExamReviewQuestion extends ExamQuestion {
+  userAnswer: string[];
+  isCorrect: boolean;
+  score: number;
+  explanation: string | null;
+}
+
+/** GET /v1/exam/review 返回 */
+export interface ExamAttemptReview {
+  attemptId: string;
+  passed: boolean;
+  score: number;
+  totalScore: number;
+  scorePercent: number;
+  correctCount: number;
+  questionCount: number;
+  submittedAt: string;
+  config: ExamConfig;
+  questions: ExamReviewQuestion[];
+}
+
+/** 平台 AI 角色卡（GET /v1/ai/characters） */
+export interface AiRoleCard {
+  slug: string;
+  displayName: string;
+  bio?: string | null;
+  avatar?: string | null;
+  sortOrder?: number;
+  suggestedQuestions?: string[] | null;
+  boundUser?: {
+    id: string;
+    login?: string;
+    isAiAgent?: boolean;
+    authorDocumentId?: string | null;
+    name?: string;
+    avatar?: string | null;
+  } | null;
+  /** 该角色默认模型 key；null = 用后端兜底（AstrBot 自身默认 provider） */
+  defaultModelKey?: string | null;
+  /** 该角色允许的模型 key 白名单；null / 缺省 = 不限制（全部启用模型可选） */
+  allowedModelKeys?: string[] | null;
+}
+
+/**
+ * 敲敲可选的 AI 模型（GET /v1/ai/models）。
+ * 清单在管理后台维护；`key` 是前后端唯一契约，
+ * AstrBot 侧的 provider id 不出网。
+ */
+export interface AiModel {
+  key: string;
+  displayName: string;
+  description?: string | null;
+  /** 短标签（"快"/"强"/"实验"），气泡与选择器上做角标 */
+  badge?: string | null;
+  sortOrder?: number;
+}
+
+/**
+ * 敲敲当日额度（GET /v1/ai/quota，需登录）。
+ *
+ * 后端按加权 token 扣额度（真实 token × 该模型的倍率），但接口**只回百分比** ——
+ * 额度条要的就是这一个数，token 数与上限都只在后台。
+ * `unlimited` = 后台没配上限；`resetAt` 是下一次日切（本地 04:00）的绝对时刻。
+ */
+export interface AgentQuota {
+  globalEnabled: boolean;
+  /** 当日已用百分比（0-100） */
+  percent: number;
+  exhausted: boolean;
+  unlimited: boolean;
+  resetAt: string;
+  /** Redis 读不到用量时为 false —— 此时不要把 0 当成「没用过」 */
+  available: boolean;
+}
+
+export interface CoverImage {
+  documentId?: string;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ExternalVideo {
+  provider: string;
+  bvid?: string | null;
+  aid?: number | null;
+  cid?: number | null;
+  p?: number | null;
+  page?: number | null;
+  embedUrl?: string | null;
+  coverUrl?: string | null;
+  coverLoadError?: boolean;
+  title?: string | null;
+  duration?: number | null;
+  /** 用户提交的原始链接（服务端解析视频用） */
+  source?: string;
+}
+
+export interface BilibiliPage {
+  cid: number;
+  page: number;
+  part?: string;
+  duration?: number;
+}
+
+export interface BilibiliVideoInfo {
+  bvid?: string;
+  aid?: number;
+  title?: string;
+  pic?: string;
+  duration?: number;
+  cid?: number;
+  videos?: number;
+  pages?: BilibiliPage[];
+  owner?: { name?: string; mid?: number };
+}
+
+/** 委托分类（频道）。GET /v1/categories 返回完整列表。 */
+export interface Category {
+  documentId?: string;
+  name: string;
+  slug: string;
+  order?: number;
+  /** 该分区是否仅管理员可发布委托（发布委托分类选择器据此对非管理员隐藏）。 */
+  adminOnly?: boolean;
+}
+
+/** 委托上附带的精简分类信息（接口随文章一并返回）。 */
+export interface PostCategory {
+  name: string;
+  slug: string;
+}
+
+/** 标签（话题横切维度，与频道 category 正交）。 */
+export interface Tag {
+  name: string;
+  slug: string;
+}
+
+/** 委托上附带的精简标签信息（接口随文章一并返回）。 */
+export interface PostTag {
+  name: string;
+  slug: string;
+}
+
+export interface Post {
+  id: string;
+  title: string;
+  body?: string;
+  bodyText?: string;
+  rawBodyText?: string;
+  externalVideos?: ExternalVideo[];
+  covers: CoverImage[];
+  cover?: string;
+  coverWidth?: number;
+  coverHeight?: number;
+  views?: number;
+  likesCount?: number;
+  commentsCount?: number;
+  isRead?: boolean;
+  liked?: boolean;
+  favorited?: boolean;
+  favoritesCount?: number;
+  dennyCount?: number;
+  hasGivenDenny?: boolean;
+  isAnonymous?: boolean;
+  /** 仅作者本人可见：内容因举报被隐藏（他人访问详情直接 404） */
+  isHidden?: boolean;
+  /** 当前登录用户是否为该委托作者（解决匿名委托 author.documentId 为 null 的问题）。 */
+  isOwner?: boolean;
+  /** 是否被全局置顶（公告）。 */
+  isPinned?: boolean;
+  /** 置顶时间（ISO 8601）。 */
+  pinnedAt?: string | null;
+  /** 已解决（存在被采纳的最佳答案）的时间（ISO 8601）；null 表示未解决。 */
+  solvedAt?: string | null;
+  /**
+   * 所在分区是否开启评论采纳（仅详情接口下发，缺省视为未开启）。未开启时不能采纳新评论，
+   * 存量最佳答案仍可取消采纳。
+   */
+  allowCommentAccept?: boolean;
+  category?: PostCategory | null;
+  tags?: PostTag[];
+  createdAt?: string;
+  updatedAt?: string;
+  editedAt?: string;
+  publishedAt?: string;
+  /** 首次发布时间（ISO 8601）。编辑重发不会改变，用于展示"发布于"。 */
+  firstPublishedAt?: string | null;
+  /** 最近一次新活动时间，用于信息流更新对账。 */
+  bumpedAt?: string | null;
+  /** 该帖最后一次顶起/发布是否由当前登录用户自己触发；服务端按 viewer 计算下发，
+   *  用于让「有 N 条新内容」跳过自己的动作。 */
+  bumpedBySelf?: boolean;
+  author: Author;
+}
+
+export interface CommentReply {
+  id: string;
+  content: string;
+  images?: CoverImage[];
+  liked?: boolean;
+  likesCount?: number;
+  createdAt?: string;
+  author: Author;
+}
+
+export interface Comment {
+  id: string;
+  content: string;
+  images?: CoverImage[];
+  liked?: boolean;
+  likesCount?: number;
+  createdAt?: string;
+  author: Author;
+  replies: CommentReply[];
+  /**
+   * 该顶层评论的可见回复总数（后端已扣掉隐藏/拉黑）。
+   * 列表接口只带前 3 条回复，replies.length 不再等于回复总数，凡是要「回复有多少条」的
+   * 地方都得用这个字段。后端尚未部署时缺省，由 toComment 用 replies.length 兜底。
+   */
+  repliesCount?: number;
+  /** 是否还有没加载的回复（repliesCount > replies.length）。缺省时按 false 处理。 */
+  repliesHasMore?: boolean;
+  articleId?: string;
+  articleTitle?: string;
+  /** 是否被置顶（仅顶层评论可能为 true）。 */
+  isPinned?: boolean;
+  /** 置顶时间（ISO 8601）。 */
+  pinnedAt?: string;
+  /** 是否被帖主/管理员采纳为最佳答案（仅顶层评论）。 */
+  isAccepted?: boolean;
+  /** 采纳时间（ISO 8601）。 */
+  acceptedAt?: string;
+  /** 展示楼层号（列表接口按 desc 顺序返回），置顶评论无楼层号。 */
+  floor?: number;
+}
+
+export interface ProfileStats {
+  articleCount: number;
+  commentCount: number;
+  totalViews: number;
+  totalComments: number;
+  totalLikes: number;
+}
+
+export type BusinessCardType = "character" | "city" | "news";
+
+export interface BusinessCard {
+  documentId: string;
+  name: string;
+  description?: string;
+  story?: unknown[];
+  type: BusinessCardType;
+  image?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+}
+
+export type AvatarType = BusinessCardType;
+
+export interface Avatar {
+  documentId: string;
+  name: string;
+  type: AvatarType;
+  image?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+}
+
+export interface Profile {
+  documentId: string;
+  /** 用户 id（与 documentId 相同；64 位雪花 id 的字符串形式，不能转 number） */
+  uid?: string;
+  /** 会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。只用于展示，接口调用仍用 uid */
+  memberNo?: number;
+  login?: string;
+  name?: string;
+  bio?: string;
+  avatar?: string;
+  level?: number;
+  exp?: number;
+  isSelf?: boolean;
+  isHidden?: boolean;
+  profileHidden?: boolean;
+  isFollowing?: boolean;
+  followersCount?: number;
+  followingCount?: number;
+  stats?: ProfileStats;
+  equippedCard?: BusinessCard;
+  equippedAvatar?: Avatar;
+  isAiAgent?: boolean;
+  isBlockedByMe?: boolean;
+  hasBlockedMe?: boolean;
+  /** 绑定的绝区零角色（米游社绑定） */
+  zzz?: ZzzRoleBadge | null;
+}
+
+/** 主页展示的绝区零角色徽章 */
+export interface ZzzRoleBadge {
+  uid: string;
+  nickname?: string;
+  level?: number;
+  regionName?: string;
+}
+
+/** 当前用户的米游社绑定信息 */
+export interface MihoyoBinding {
+  aid: string;
+  zzzUid: string | null;
+  zzzNickname: string | null;
+  zzzLevel: number | null;
+  zzzRegion: string | null;
+  zzzRegionName: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface LikeToggleResult {
+  liked: boolean;
+  likesCount: number;
+}
+
+export interface FavoriteToggleResult {
+  favorited: boolean;
+  favoritesCount: number;
+}
+
+export interface FollowToggleResult {
+  following: boolean;
+  followersCount: number;
+}
+
+export interface UserBlockToggleResult {
+  blocked: boolean;
+  authorDocumentId: string;
+}
+
+export interface BlockedUser {
+  documentId: string;
+  name?: string;
+  username?: string;
+  level?: number;
+  avatar?: string;
+  createdAt?: string;
+}
+
+/** 首页 feed 模式：全部 / 我关注的作者 / 我的收藏。 */
+export type ArticleFeed = "all" | "following" | "favorites";
+
+/**
+ * 首页排序：最新（纯时间序）/ 热门（纯热度榜）。两条流互斥 ——
+ * 「最新」里不掺热门帖，「热门」里不掺置顶帖，也不接时间序兜底。
+ * 未看：后端按阅读记录剔除当前账号点开过的帖子后的最新流，需登录。
+ */
+export type ArticleSort = "latest" | "hot" | "unread";
+
+export type UploadStatus =
+  | "pending"
+  | "compressing"
+  | "uploading"
+  | "done"
+  | "error";
+
+export interface UploadTask {
+  localId: string;
+  filename: string;
+  file: File;
+  status: UploadStatus;
+  progress: number;
+  previewUrl: string;
+  serverId?: string;
+  serverUrl?: string;
+  error?: string;
+}
+
+export interface DraftArticle {
+  documentId: string;
+  title: string;
+  text: string;
+  editorState?: unknown[];
+  externalVideos?: ExternalVideo[];
+  cover?: CoverImage[];
+  hasPublishedVersion: boolean;
+  isAnonymous?: boolean;
+  category?: PostCategory | null;
+  tags?: PostTag[];
+  createdAt?: string;
+  updatedAt?: string;
+  author?: Author;
+}
+
+export interface SignedUploadResult {
+  uploadUrl: string;
+  uploadToken: string;
+  method: string;
+  objectKey: string;
+  publicUrl: string;
+  headers: Record<string, string>;
+  expiresAt: string;
+  // 内容级去重命中：服务端检测到同 SHA-256 的已存在文件，直接复用，跳过 S3 PUT。
+  existing?: UploadedFile;
+}
+
+export interface UploadedFile {
+  id: number;
+  documentId: string;
+  name?: string;
+  url: string;
+  mime?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  createdAt?: string;
+}
+
+// ── DM 私聊（真实双向）相关 ──────────────────────────────
+// 后端契约：ik-server 的 /v1/inbox、/v1/dm/*、/v1/ai/* 与实时事件 dm.*（见 useDmConversations 的翻译层）
+
+export type DmConversationKind = "direct" | "group";
+export type DmMemberRole = "owner" | "admin" | "member";
+/**
+ * DM 消息形态：
+ * - `text` / `image` / `system`：真实落库的 DM 消息
+ * - `notification`：会话式融合的「敲敲通知」虚拟消息（不入 message 表，
+ *   由后端在序列化阶段从 notification 表拼出来），气泡需要按
+ *   `notificationKind` 走专门渲染（点赞/收藏/评论/回复/@提到/系统等）
+ */
+export type DmMessageKind = "text" | "image" | "system" | "notification";
+
+/** 通知 kind 子分类（仅 kind === "notification" 时有意义） */
+export type DmNotificationKind =
+  | "like"
+  | "favorite"
+  | "comment"
+  | "reply"
+  | "mention"
+  | "system"
+  | "denny"
+  | "accepted";
+
+/**
+ * pseudo 会话 id：收件箱里还没有私聊的通知分组。
+ * - `pseudo:user:${userId}`  某个用户发来的通知；发消息时先开私聊（升级为真会话）
+ * - `pseudo:system`          系统通知，不可回复
+ */
+export type DmPseudoConversationId =
+  | `pseudo:user:${string}`
+  | "pseudo:system";
+
+/** 私聊会话里的对端简要信息（仅 direct 会话非空） */
+export interface DmPeer {
+  userId: string | null;
+  authorDocumentId: string | null;
+  name: string;
+  avatar: string | null;
+  level: number | null;
+  /** 对端为平台 AI 用户（如 fairy）时为 true，私聊 Tab 不展示 */
+  isAiAgent?: boolean;
+}
+
+/** 自己在该会话上的偏好与状态（mute/pin/lastRead） */
+export interface DmSelfState {
+  role: DmMemberRole;
+  muted: boolean;
+  pinned: boolean;
+  lastReadAt: string | null;
+}
+
+/** 列表预览里的最后一条消息（已对撤回/图片/系统态做兜底文案） */
+export interface DmLastMessagePreview {
+  documentId: string;
+  content: string;
+  createdAt: string;
+  kind: DmMessageKind;
+  senderUserId: string | null;
+}
+
+/** 收件箱（GET /v1/inbox）里的一项：私聊会话或通知分组 */
+export interface DmConversationSummary {
+  documentId: string;
+  kind: DmConversationKind;
+  title: string | null;
+  avatar: string | null;
+  peer: DmPeer | null;
+  memberCount: number;
+  lastMessageAt: string | null;
+  lastMessage: DmLastMessagePreview | null;
+  unreadCount: number;
+  self: DmSelfState;
+  /**
+   * 仅在「会话融合」语义下出现，标识该会话项是否是 pseudo 形态：
+   * - `null` / undefined：真 DM 会话
+   * - `"user"`：通知 sender 但暂无 DM 会话；前端首次私信时调 direct API 升级
+   * - `"anonymous"`：匿名通知聚合（不可私信）
+   * - `"system"`：系统通知聚合（不可私信）
+   *
+   * 字段值与 `documentId` 前缀一致：例如 pseudoKind === "user" 对应
+   * documentId 为 `pseudo:user:${userId}`。
+   */
+  pseudoKind?: "user" | "anonymous" | "system" | null;
+  /**
+   * 会话级模型选择（仅 AI 私聊会话非空）。
+   * null = 未选择，跟随角色卡默认模型；undefined = 还没从会话设置里读到。改动经
+   * `PATCH /v1/ai/sessions/:id { modelKey }`，并由实时事件 `dm.conversation.updated` 回推。
+   */
+  aiModelKey?: string | null;
+  /** 统一收件箱（/v1/inbox）里这一项的键：私聊 `dm-<会话 id>`，通知分组 `system` / `user-<用户 id>` */
+  inboxKey?: string;
+}
+
+/** 单条消息的 sender 简要信息（撤回后仍保留发送者，便于灰条占位） */
+export interface DmMessageSender {
+  userId: string | null;
+  authorDocumentId: string | null;
+  name: string;
+  avatar: string | null;
+  level: number | null;
+  isAiAgent?: boolean;
+}
+
+/** 引用消息的简化视图（被撤回时 content 为 null） */
+export interface DmMessageReplyTo {
+  documentId: string;
+  content: string | null;
+  senderUserId: string | null;
+}
+
+/** kind === "notification" 时的引用委托简要信息 */
+export interface DmNotificationArticleRef {
+  documentId: string;
+  title: string;
+  coverAspectRatio?: number;
+}
+
+/** kind === "notification" 时的引用评论简要信息（like-on-comment 等场景） */
+export interface DmNotificationCommentRef {
+  documentId: string;
+  content: string;
+  isAnonymous: boolean;
+}
+
+/**
+ * AI 工作流事件（3.1）：透明化 AI 的「思考→搜索→阅读→回答」过程。
+ * 实时经 WS `message.workflow` 推送；回答定稿后全量落在 DmMessage.workflow
+ * 供刷新后回放时间线。协议与 server/src/utils/agent/workflow-events.ts 一致。
+ */
+export interface AiWorkflowEvent {
+  type: string;
+  /** 同一步骤的 start/item/finish 共享 stepId，前端据此聚合状态 */
+  stepId: string;
+  /** 单调递增序号：断线去重 / 回放排序 */
+  seq: number;
+  /** ISO 时间戳 */
+  at: string;
+  data?: Record<string, unknown>;
+  usage?: { promptTokens?: number; completionTokens?: number };
+}
+
+/** 会话时间线（GET /v1/inbox/:key/items）里的一条：私信或通知 */
+export interface DmMessage {
+  /**
+   * 通用消息 documentId。
+   * - 真 DM 消息：消息 id
+   * - 通知虚拟消息：`notif:${notification.documentId}` —— 加前缀避免与 DM
+   *   消息 documentId 命名空间冲突，前端做编辑/撤回时也能据此判定不可操作。
+   */
+  documentId: string;
+  kind: DmMessageKind;
+  /**
+   * - text/image/system：消息正文，撤回后 null
+   * - notification：预渲染好的文案（"赞了你的评论" 等），保证旧版式渲染兼容
+   */
+  content: string | null;
+  createdAt: string;
+  editedAt: string | null;
+  deletedAt: string | null;
+  sender: DmMessageSender | null;
+  replyTo: DmMessageReplyTo | null;
+  /** AI 工作流事件序列（3.1）：仅 AI 流式回复定稿后非空，用于回放时间线 */
+  workflow?: AiWorkflowEvent[] | null;
+  /** 生成这条 AI 回复时用的模型 key；非 AI 消息为 null */
+  aiModelKey?: string | null;
+
+  // ── 仅 kind === "notification" 出现的字段 ──────────────────
+  /** 通知子类型：决定气泡左侧 / quote 卡 的展示文案 */
+  notificationKind?: DmNotificationKind;
+  /** 原 notification.documentId，用于 mark-read / 跳转 */
+  notificationDocumentId?: string;
+  /** 通知是否已读（与该消息所在会话的 unreadCount 是相互独立的字段） */
+  notificationRead?: boolean;
+  /** 通知关联的委托；点击 quote 卡可跳转 */
+  article?: DmNotificationArticleRef | null;
+  /** 通知关联的评论；like-on-comment 时存在 */
+  comment?: DmNotificationCommentRef | null;
+}
+
+/** WS 服务端 → 客户端事件 type 联合 */
+export type DmWsEventType =
+  | "hello"
+  | "pong"
+  | "message.created"
+  | "message.edited"
+  | "message.delta"
+  | "message.workflow"
+  | "message.deleted"
+  | "conversation.read"
+  | "conversation.read.all"
+  | "conversation.updated"
+  | "conversation.member.removed"
+  | "typing"
+  | "error";
+
+/** WS 事件公共结构（不同 type 的 data 形态见 controller 推送处） */
+export interface DmWsEvent<TData = unknown> {
+  type: DmWsEventType;
+  conversationId?: string;
+  messageId?: string;
+  data?: TData;
+  at: string;
+}

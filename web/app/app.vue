@@ -1,0 +1,246 @@
+<script setup lang="ts">
+import PostOverlay from "~/components/PostOverlay.vue";
+import { OVERLAY_KNOCK_KEY, overlayHistoryState } from "~/utils/overlay-history";
+
+const auth = useAuthStore();
+const router = useRouter();
+const postModal = usePostModal();
+const knockModal = useKnockKnockModal();
+const benefitsModal = useBenefitsModal();
+const checkInReminder = useCheckInReminder();
+const gpuAccelerated = useGpuAccelerated();
+
+if (import.meta.client) {
+  auth.hydrateFromStorage();
+
+  // 初始化账号缓存清理；安全信息、绑定和黑名单由账号页按需加载。
+  useAccountData();
+
+  // 检测到软件渲染（未启用 GPU 加速）时，提前给 html 加标记，
+  // CSS 据此关闭全局跑马灯，避免 CPU 路径下全屏重绘造成滚动卡顿。
+  if (!gpuAccelerated.value) {
+    document.documentElement.classList.add("no-gpu");
+  }
+
+  const url = new URL(window.location.href);
+  const fallbackPath = url.searchParams.get("p");
+  if (fallbackPath) {
+    url.searchParams.delete("p");
+    window.history.replaceState(overlayHistoryState({}), "", url.toString());
+    router.replace(decodeURIComponent(fallbackPath)).catch(() => undefined);
+  }
+
+  // 后端返回 EXAM_REQUIRED（未通过入站考试）时引导去考试页
+  let lastExamRedirectAt = 0;
+  window.addEventListener("exam:required", () => {
+    const now = Date.now();
+    if (now - lastExamRedirectAt < 3000) return;
+    lastExamRedirectAt = now;
+    if (router.currentRoute.value.path !== "/exam") {
+      router.push("/exam").catch(() => undefined);
+    }
+  });
+
+  // 监听浏览器后退/前进：如果弹窗打开，关闭它
+  window.addEventListener("popstate", postModal.handlePopState);
+  window.addEventListener("popstate", knockModal.handlePopState);
+
+  // 路由变化时收起弹窗。同 path 仅 query 变化（history.back 去掉 ik_knock）时
+  // 只关敲敲；委托弹窗用 /post/:id，path 变化时关闭。
+  router.beforeEach((to, from) => {
+    if (to.path !== from.path) {
+      // 浮层只占一条 /post/:id 历史，切换相关委托走 replaceState 不触发路由导航；
+      // 因此任何真正的路由跳转（回首页 / 标签页，或点编辑 / 标签跳出）都应收起浮层。
+      if (postModal.isOpen.value) postModal.teardown();
+      // 从委托弹窗 back 回带 ik_knock 的页面时，敲敲仍应保留
+      const knockStillInUrl = Boolean(to.query[OVERLAY_KNOCK_KEY]);
+      if (knockModal.visible.value && !knockStillInUrl) {
+        knockModal.teardown();
+      }
+      return;
+    }
+
+    const hadKnock = Boolean(from.query[OVERLAY_KNOCK_KEY]);
+    const hasKnock = Boolean(to.query[OVERLAY_KNOCK_KEY]);
+    if (knockModal.visible.value && hadKnock && !hasKnock) {
+      knockModal.teardown();
+    }
+  });
+}
+
+// 页面可见性及窗口失焦检测，通过生命周期钩子管理以确保健壮性，防止 HMR 热更新导致内存泄漏
+let handleVisibilityAndFocus: (() => void) | null = null;
+
+onMounted(() => {
+  if (import.meta.client) {
+    handleVisibilityAndFocus = () => {
+      const isFocused = document.visibilityState === "visible" && document.hasFocus();
+      if (isFocused) {
+        document.body.classList.remove("is-page-blurred");
+      } else {
+        document.body.classList.add("is-page-blurred");
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityAndFocus);
+    window.addEventListener("focus", handleVisibilityAndFocus);
+    window.addEventListener("blur", handleVisibilityAndFocus);
+
+    // 页面挂载时初始化状态
+    handleVisibilityAndFocus();
+  }
+});
+
+onBeforeUnmount(() => {
+  if (import.meta.client && handleVisibilityAndFocus) {
+    document.removeEventListener("visibilitychange", handleVisibilityAndFocus);
+    window.removeEventListener("focus", handleVisibilityAndFocus);
+    window.removeEventListener("blur", handleVisibilityAndFocus);
+    document.body.classList.remove("is-page-blurred");
+  }
+});
+
+const handleOverlayClose = () => {
+  postModal.close();
+};
+
+// create 页有自带的移动端底部操作栏（发布 / 草稿），全局 MobileBottomNav 在此隐藏避免堆叠
+const route = useRoute();
+const showMobileBottomNav = computed(
+  () => !route.path.startsWith("/create") && !route.path.startsWith("/post/"),
+);
+
+// 全屏弹窗（委托 / 敲敲）打开时，全局背景跑马灯被完全遮住但仍在动，且处于
+// 弹窗 backdrop-filter 模糊之后 → 迫使模糊每帧重算。此时暂停它（弹窗自带的
+// 那份跑马灯照常显示），缓解「点开弹窗卡顿」。
+const overlayOpen = computed(
+  () =>
+    postModal.isOpen.value ||
+    knockModal.visible.value ||
+    benefitsModal.visible.value ||
+    checkInReminder.visible.value,
+);
+</script>
+
+<template>
+  <div v-if="['/web', '/h5', '/web/admin', '/h5/admin'].includes(route.path)">
+    <NuxtPage />
+  </div>
+  <div v-else>
+    <IkZzzMarquee class="ik-global-marquee" :paused="overlayOpen" />
+    <!-- backdrop-filter 合成层预热：1×1 不可见元素，让 GPU 在首屏就把
+         模糊着色器编译好、合成层分配好。否则用户第一次打开弹窗再关闭时，
+         合成层首次创建/销毁会多吃 1~3 帧 paint，表现为出场动画期间弹窗
+         背后闪烁一下。常驻显存代价 ≈ 4 字节，可忽略。 -->
+    <ClientOnly>
+      <div aria-hidden="true" class="ik-backdrop-warmup"></div>
+    </ClientOnly>
+
+    <AppHeader />
+    <main class="ik-page">
+      <NuxtPage />
+    </main>
+    <MobileBottomNav v-if="showMobileBottomNav" />
+
+    <!-- 登录弹窗 -->
+    <ClientOnly>
+      <LazyLoginDialog />
+    </ClientOnly>
+
+    <!-- 确认弹窗 -->
+    <ClientOnly>
+      <LazyConfirmDialog />
+    </ClientOnly>
+
+    <!-- 创作权益弹窗 -->
+    <ClientOnly>
+      <Teleport to="body">
+        <Transition name="ik-overlay" appear>
+          <LazyBenefitsModal v-if="benefitsModal.visible.value" />
+        </Transition>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- 登录后的今日签到提醒（触发闸门在 plugins/check-in-reminder.client.ts） -->
+    <ClientOnly>
+      <Teleport to="body">
+        <Transition name="ik-overlay" appear>
+          <LazyCheckInReminderModal v-if="checkInReminder.visible.value" />
+        </Transition>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- 举报弹窗 -->
+    <ClientOnly>
+      <LazyReportModal />
+    </ClientOnly>
+
+    <!-- 敲敲弹窗（消息通知 / 私聊 / 群聊入口） -->
+    <ClientOnly>
+      <LazyKnockKnockModal />
+    </ClientOnly>
+
+    <!-- 委托详情弹窗（从首页点击卡片时弹出）
+         注：必须用同步组件而非 LazyPostOverlay。<Transition> 包异步组件时，
+         弱网下 chunk 加载延迟会让 enter 动画错过首帧 → 用户感知为闪烁。 -->
+    <ClientOnly>
+      <Teleport to="body">
+        <Transition
+          name="ik-overlay"
+          appear
+          @after-enter="postModal.markEntered()"
+          @after-leave="postModal.clearAfterLeave()"
+        >
+          <PostOverlay
+            v-if="postModal.isOpen.value"
+            :post-id="postModal.postId.value || ''"
+            :cover-hint="postModal.coverHint.value"
+            :preview="postModal.preview.value"
+            :target-comment-id="postModal.targetCommentId.value"
+            @close="handleOverlayClose"
+          />
+        </Transition>
+      </Teleport>
+    </ClientOnly>
+  </div>
+</template>
+
+<style scoped>
+/* backdrop-filter 合成层预热元素：
+   - 必须真的有非零尺寸，否则浏览器会跳过合成层分配
+   - 必须真的应用 backdrop-filter，触发着色器编译
+   - opacity:0 + pointer-events:none 让用户感知不到 */
+.ik-backdrop-warmup {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  /* 永久性 will-change 让浏览器把这个层一直保留在 GPU 上，
+     与委托弹窗共用 backdrop-filter 着色器管线 */
+  will-change: backdrop-filter;
+  contain: strict;
+  z-index: -1;
+}
+
+/* 全局背景跑马灯：固定定位覆盖整个视口 */
+.ik-global-marquee {
+  position: fixed !important;
+  inset: 0;
+  z-index: -9999 !important;
+}
+
+/* 仅放大作为全屏背景的这一实例（桌面端）；移动端弹窗由组件自身 @media 放大 */
+.ik-global-marquee :deep(.ik-zzz-marquee__band) {
+  width: 260%;
+  height: 260%;
+  left: -80%;
+  top: -80%;
+  font-size: clamp(360px, 48vw, 640px);
+}
+
+</style>

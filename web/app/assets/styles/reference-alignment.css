@@ -1,0 +1,209 @@
+/* Reference-informed layout, NOT an official style authority.
+   Product direction: retain the approved lime UI, banner and independent plate motion.
+   share121/inter-knot @66b275a:
+   discussion_card.dart: #222, 50px avatar at -26px, 16px title, 3-line summary.
+   discussion_page.dart: dotted black header, 4:5 cover/text split, 80vw dialog.
+   Keep self-hosted account/actions instead of upstream GitHub dependencies. */
+:root{--ik-primary:#d7fa00;--ik-post-card-inner-bg:#222;--ik-post-card-outer-bg:#080808;--ik-post-card-title-size:16px;--ik-post-card-title-color:#eee;--ik-post-card-author-name-color:#888;--ik-post-card-author-name-size:14px;--ik-post-card-avatar-size:50px;--ik-post-card-avatar-offset:-26px;--ik-post-card-radius:18px 18px 0 18px;--ik-post-card-inner-radius:15px 15px 0 15px;--ik-post-card-body-padding:0 8px 12px}
+html,body,#__nuxt{background:#121212}
+body .ik-page{background-color:#121313;background-image:radial-gradient(#ffffff09 .8px,transparent .8px);background-size:5px 5px}
+body .ik-global-marquee{opacity:.09}
+body .ik-header{box-shadow:none;border-bottom:0}
+body .ik-header .ik-header__inner{max-width:none;padding-left:16px;padding-right:16px}
+body .ik-header .ik-header-tabs{border:3px solid #313131;box-shadow:none;background-image:url('/images/tab-bg-point.webp')}
+body .ik-home-container{padding-top:16px}
+body .ik-home-toolbar{border-bottom:2px solid #393c36;padding-bottom:15px}
+body .ik-card{border:0;box-shadow:none;padding:3px;transition:background 140ms}
+body .ik-card:hover{transform:none;background:var(--ik-primary)}
+body .ik-card .ik-card__link{background:#222}
+body .ik-card .ik-card__cover{object-fit:cover;object-position:center;filter:none}
+body .ik-card .ik-card__title{font-size:16px;font-weight:700;line-height:1.4;padding:0;letter-spacing:0}
+body .ik-card .ik-card__author-name{color:#888;font-weight:700}
+body .ik-card .ik-card__avatar-shell{padding:2px}
+body .ik-card .ik-card__views{background:#0007;border:0;padding:3px 6px;top:8px;left:8px;font-size:12px;border-radius:5px}
+body .ik-card .ik-card__views-icon{width:18px;height:18px}
+body .ik-card .ik-card__excerpt{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:0 3px;color:#b3b3b1;font-size:13px;line-height:1.55;font-weight:400}
+body .ik-card .ik-card__author-divider{background:#3b3b3b}
+/* Cover left; body + discussion in the same right-hand scroll area. */
+body .ik-overlay .ik-dialog{width:min(1280px,80vw)}
+body .ik-overlay .ik-dialog__header,body .ik-page-container .ik-page__header{background:url('/images/discussion-page-bg-point.webp') repeat,linear-gradient(#161616,#080808);border-bottom:0;min-height:60px;padding:8px 16px}
+body .ik-overlay .ik-dialog__author-name,body .ik-page-container .ik-page__author-name{color:#aaa;font-size:16px;font-style:normal}
+body .ik-overlay .ik-dialog__time,body .ik-page-container .ik-page__time{color:#808080}
+body .ik-overlay .ik-dialog__outer,body .ik-page-container .ik-page__outer{background:#ffffff3b;box-shadow:none;border-radius:16px 0 16px 16px}
+body .ik-overlay .ik-dialog__main,body .ik-page-container .ik-page__main{background:#121212}
+body .ik-overlay .ik-dialog__left,body .ik-page-container .ik-page__left{flex:4}
+body .ik-overlay .ik-dialog__right,body .ik-page-container .ik-page__right{flex:5;background:#070707;border:0;border-radius:16px}
+body .ik-overlay .ik-dialog__left-scroll,body .ik-page-container .ik-page__left-scroll{background:transparent;border:0;margin:16px 8px 16px 16px}
+body .ik-overlay .ik-dialog__cover-wrap,body .ik-page-container .ik-page__cover-wrap{padding:0}
+body .ik-overlay .ik-dialog__cover-border,body .ik-page-container .ik-page__cover-border{max-height:none;border:4px solid #313132;border-radius:16px;background:#101010}
+body .ik-overlay .ik-dialog__right .ik-dialog__detail,body .ik-page-container .ik-page__right .ik-page__detail{padding:10px 0 24px}
+body .ik-overlay .ik-dialog__title,body .ik-page-container .ik-page__title{font-size:25px;font-weight:700;line-height:1.45}
+body .ik-overlay .ik-dialog__content,body .ik-page-container .ik-page__content{color:#c5c5c5;font-size:15px;line-height:1.85}
+body .ik-overlay .ik-dialog__comments-heading,body .ik-page-container .ik-page__comments-heading{font-size:17px;font-style:normal;border-bottom:1px solid #333;color:#ddd}
+body .ik-overlay .ik-dialog__comments-heading span,body .ik-page-container .ik-page__comments-heading span{font-size:17px;color:#aaa}
+body :is(.ik-overlay,.ik-page-container) .ik-comment + .ik-comment{border-top:1px solid #292929}
+body :is(.ik-overlay,.ik-page-container) .ik-comment__body{color:#bdbdbd}
+body :is(.ik-overlay,.ik-page-container) .ik-engage-bar{background:#171717;border-top:1px solid #333}
+body :is(.ik-overlay,.ik-page-container) .ik-engage-bar__input-wrap{background:#222;border-color:#444}
+@media(max-width:768px){
+ body .ik-home-container{width:calc(100% - 16px)!important}
+ body .ik-card .ik-card__title{font-size:14px}
+ body .ik-card .ik-card__excerpt{font-size:12px;-webkit-line-clamp:3}
+ body .ik-card .ik-card__author-name{font-size:12px}
+ body .ik-overlay .ik-dialog{width:100vw}
+ body .ik-overlay .ik-dialog__left-scroll,body .ik-page-container .ik-page__left-scroll{margin:0}
+ body .ik-overlay .ik-dialog__right,body .ik-page-container .ik-page__right{border-radius:0}
+ body .ik-overlay .ik-dialog__title,body .ik-page-container .ik-page__title{font-size:22px}
+}
+body .ik-guest-account{display:flex;align-items:center;gap:9px;border:0;border-radius:40px;background:linear-gradient(#212121,#141414 90%,#181818);padding:8px 13px 8px 8px;color:#ddd;text-align:left;min-width:230px;cursor:pointer}
+body .ik-guest-account>img{width:42px;height:42px;border:2px solid #393939;border-radius:50%;object-fit:cover}
+body .ik-guest-account span{display:flex;flex-direction:column;gap:4px}
+body .ik-guest-account b{font-size:17px;line-height:1;font-weight:700}
+body .ik-guest-account small{font-size:10px;color:#777;line-height:1.2}
+body .ik-guest-account__level{margin-left:auto;text-align:center}
+body .ik-guest-account__level b{font-size:24px}
+@media(min-width:769px){body .ik-header .ik-brand{display:none}}
+@media(max-width:1024px){
+ body .ik-overlay .ik-dialog__left,body .ik-page-container .ik-page__left{flex:none;overflow:visible}
+ body .ik-overlay .ik-dialog__left-scroll,body .ik-page-container .ik-page__left-scroll{flex:none;overflow:visible;margin:0}
+ body .ik-overlay .ik-dialog__right,body .ik-page-container .ik-page__right{flex:1 0 auto;overflow:visible}
+ body .ik-overlay .ik-dialog__cover-border,body .ik-page-container .ik-page__cover-border{max-height:500px}
+}
+@media(max-width:768px){body .ik-guest-account{display:none}}
+
+/* One shared capsule per navigation group. The hit areas and type stay fixed. */
+body .ik-home-container .ik-home-nav-hub .ik-stream-tabs{gap:0;padding:2px;background:#080808 url('/images/tab-bg-point.webp') repeat;border:3px solid #313131;border-radius:999px;box-shadow:none;overflow:visible}
+body .ik-home-container .ik-home-nav-hub .ik-tabs-indicator{display:none}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab{position:relative;isolation:isolate;z-index:0;background:transparent;border:0;box-shadow:none;border-radius:999px;transform:none;height:38px;padding:0 22px;overflow:visible;font-size:14px;font-weight:900;color:#b5bca8;transition:color 120ms}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab::before{content:'';position:absolute;inset:2px 3px;z-index:-1;pointer-events:none;border:2px solid transparent;border-radius:999px;background:transparent;box-shadow:none;transform:none;transform-origin:center;transition:inset 140ms}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab > *{position:relative;z-index:1;transform:none}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab__label{display:inline-block}
+/* Hover/focus on an unselected item is ONLY an empty gray contour. */
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab:not([data-state=active]):is(:hover,:focus-visible){color:#eee}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab:not([data-state=active]):is(:hover,:focus-visible)::before{background:transparent;border-color:#858585;animation:none;inset:-2px -3px;transform:none}
+/* Only the actual selected tab owns the solid green plate. */
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab[data-state=active]{color:#10160a}
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab[data-state=active]::before{background:var(--ik-primary);border-color:transparent;animation:ik-nav-plate-breathe 800ms ease-in-out infinite}
+body .ik-home-container .ik-home-nav-hub .ik-category-trigger{border:2px solid #454545;border-radius:999px;background:#171717;height:36px;color:#c9d4b9}
+body .ik-home-container .ik-home-nav-hub .ik-category-track--active .ik-category-trigger{border-color:var(--ik-primary);color:var(--ik-primary)}
+/* Both navigation rows breathe in width and height; round ends stay circular. */
+body .ik-header .ik-header-tab{transform:none;overflow:visible;background:transparent;box-shadow:none}
+body .ik-header .ik-header-tab__content{transform:none;transition:none}
+body .ik-header .ik-tab-highlight{position:absolute;inset:2px 3px;width:auto;height:auto;border:2px solid transparent;border-radius:999px;box-sizing:border-box;background:transparent;filter:none;animation:none;opacity:0;transform:none}
+body .ik-header .ik-header-tab:not(.is-active):is(:hover,:focus-visible){color:#eee}
+body .ik-header .ik-header-tab:not(.is-active):is(:hover,:focus-visible) .ik-tab-highlight{opacity:1;color:#858585;animation:none;inset:-2px -3px;border-color:#858585;transform:none}
+body .ik-header .ik-header-tab.is-active{color:#11170b}
+body .ik-header .ik-header-tab.is-active .ik-tab-highlight{opacity:1;background:var(--ik-primary);animation:ik-nav-plate-breathe 800ms ease-in-out infinite}
+body .ik-header .ik-header-tab:active .ik-header-tab__content{transform:none}
+/* A primary form button uses the same independent backing plate. */
+body .local-auth .connect{position:relative;isolation:isolate;transform:none;background:transparent;border:0;box-shadow:none;overflow:visible}
+body .local-auth .connect::before{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--ik-primary);border:2px solid #e7ff4b;border-radius:8px 8px 0 8px;box-shadow:3px 4px #080d05;transition:inset 140ms}
+body .local-auth .connect:not(:disabled):is(:hover,:focus-visible)::before{animation:ik-form-plate-breathe 900ms ease-in-out infinite}
+body .local-auth .connect:not(:disabled):active::before{animation:none;transform:scale(.96)}
+@keyframes ik-form-plate-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.025,1.07)}}
+@media(max-width:768px){
+ body .ik-home-container .ik-home-nav-hub .ik-stream-tabs{gap:0;padding:2px}
+ body .ik-home-container .ik-home-nav-hub .ik-stream-tab{height:32px;padding:0 10px;font-size:11px}
+ body .ik-home-container .ik-home-nav-hub .ik-category-trigger{height:32px;font-size:11px}
+ body .ik-terminal-masthead{margin-bottom:20px}
+}
+@media(prefers-reduced-motion:reduce){
+ body .ik-header .ik-header-tab .ik-tab-highlight,
+ body .ik-home-container .ik-home-nav-hub .ik-stream-tab::before,
+ body .local-auth .connect::before{animation:none!important;transition:none!important}
+}
+
+/* Desktop WEB shell: account/search utility row + full-width primary navigation.
+   This is intentionally not the mobile/H5 header scaled up. */
+@media(min-width:1025px){
+ :root{--ik-desktop-header-height:142px}
+ body .ik-header .ik-header__inner{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,600px);grid-template-rows:60px 52px;gap:10px 30px;min-height:var(--ik-desktop-header-height);max-width:1648px;margin:0 auto;padding:10px 24px}
+ body .ik-header .ik-header__left{grid-column:1;grid-row:1;width:100%;min-width:0}
+ body .ik-header .ik-header__middle{grid-column:2;grid-row:1;width:100%;justify-content:flex-end}
+ body .ik-header .ik-search-shell{width:100%;min-width:0;max-width:600px}
+ body .ik-header .ik-header__right{grid-column:1/-1;grid-row:2;display:flex;width:100%;min-width:0;justify-content:stretch}
+ body .ik-header .ik-header-tabs{display:flex;width:100%;height:48px;flex:1;border:3px solid #393939;border-radius:999px;background:#080808 url('/images/tab-bg-point.webp') repeat;padding:0 6px;overflow:visible}
+ body .ik-header .ik-header-tab{width:auto;flex:1;height:42px;min-width:0;font-size:20px}
+ body .ik-header .ik-tab-highlight{position:absolute;inset:2px 3px;width:auto;height:auto;border:2px solid transparent;border-radius:999px;box-sizing:border-box;background:transparent;filter:none;animation:none;opacity:0;transform:none}
+ body .ik-header .ik-header__knock,body .ik-header .ik-mobile-avatar{display:none}
+ body .ik-header .ik-level-display{display:inline-flex}
+ body .ik-page{min-height:calc(100dvh - var(--ik-desktop-header-height))}
+ body .ik-page .ik-page-container{top:var(--ik-desktop-header-height)}
+ body .ik-page-container .ik-page__shell{max-height:calc(100dvh - var(--ik-desktop-header-height) - 32px)}
+ body .ik-page .ik-create-page{height:calc(100dvh - var(--ik-desktop-header-height))}
+ body .ik-home-container{width:min(1600px,calc(100% - 48px));padding-top:24px}
+ body .ik-terminal-masthead{min-height:172px;padding:25px 30px;margin-top:0;margin-bottom:28px}
+ body .ik-terminal-masthead h1{font-size:60px}
+ body .ik-terminal-masthead h1 span{font-size:48px}
+ body .ik-terminal-masthead__art{height:320px;top:-55px}
+ body .ik-home-container .ik-home-toolbar__nav{width:100%;gap:18px}
+ body .ik-home-container .ik-home-nav-hub .ik-stream-tabs{flex:1;min-width:0;display:flex;width:auto;padding:4px}
+ body .ik-home-container .ik-home-nav-hub .ik-stream-tab{flex:1;min-width:0;height:40px;padding:0 18px;font-size:16px}
+ body .ik-home-container .ik-home-nav-hub .ik-category-track{flex:0 0 135px;margin-left:0}
+ body .ik-home-container .ik-home-nav-hub .ik-category-trigger{height:40px;width:100%;justify-content:center}
+}
+@media(min-width:1025px) and (max-width:1300px){body .ik-header .ik-header-denny{display:none}}
+@media(min-width:1025px){
+ body #__nuxt .ik-mobile-nav{display:none}
+ body #__nuxt .ik-page{padding-bottom:0}
+}
+
+/* One motion contract for desktop, H5 and the feed: never animate the label.
+   Every bubble has a fixed center; the track-sized resting plate expands outward.
+   Percent offsets give short mobile tabs and wide Web tabs identical proportions. */
+body .ik-header .ik-header-tabs,
+body .ik-home-container .ik-home-nav-hub .ik-stream-tabs{padding:0;gap:0}
+@keyframes ik-nav-plate-breathe{
+  0%,100%{inset:0;animation-timing-function:cubic-bezier(.55,.055,.675,.19)}
+  50%{inset:-4%;animation-timing-function:cubic-bezier(.4,0,.2,1)}
+}
+body #__nuxt .ik-mobile-nav__item{position:relative;isolation:isolate;background:transparent;overflow:visible}
+body #__nuxt .ik-mobile-nav__item::before{content:'';position:absolute;inset:0;border-radius:999px;z-index:-1;pointer-events:none;background:transparent}
+body #__nuxt .ik-mobile-nav__item.is-active{color:#11170b}
+body #__nuxt .ik-mobile-nav__item.is-active::before{background:var(--ik-primary);animation:ik-nav-plate-breathe 800ms ease-in-out infinite}
+body #__nuxt .ik-mobile-nav__item .ik-mobile-nav__inner{transform:none;transition:none}
+body #__nuxt .ik-mobile-nav__item.is-active .ik-mobile-nav__label{color:inherit}
+/* Legacy focus/overlay optimizations paused only the header. Keep all three
+   bubbles running consistently; reduced-motion remains the explicit exception. */
+body .ik-header .ik-header-tab.is-active .ik-tab-highlight,
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab[data-state=active]::before,
+body #__nuxt .ik-mobile-nav__item.is-active::before{animation-play-state:running!important}
+@media(prefers-reduced-motion:reduce){
+ body #__nuxt .ik-mobile-nav__item.is-active::before{animation:none!important}
+}
+
+/* H5 uses a real horizontal capsule track, not a breathing oval stretched over
+   the legacy 58px stacked-icon footer. Safe-area space belongs outside the track. */
+@media(max-width:1024px){
+ body #__nuxt .ik-mobile-nav{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));height:46px;box-sizing:border-box;padding:0;border:3px solid #313131;border-radius:999px;background:#080808 url('/images/tab-bg-point.webp') repeat;align-items:stretch;overflow:visible}
+ body #__nuxt .ik-mobile-nav__item{min-width:0;height:40px;border-radius:999px}
+ body #__nuxt .ik-mobile-nav__item .ik-mobile-nav__inner{flex-direction:row;gap:4px;transform:none;transition:none}
+ body #__nuxt .ik-mobile-nav__icon{width:18px;height:18px}
+ body #__nuxt .ik-mobile-nav__label{font-size:11px;line-height:1.2}
+ body #__nuxt .ik-mobile-nav__create-wrap{width:38px}
+ body #__nuxt .ik-mobile-nav__create-btn{width:30px;height:30px;transform:none;box-shadow:none}
+ body #__nuxt .ik-mobile-nav__create-btn::before{display:none}
+ body #__nuxt .ik-mobile-nav__create-btn:active{transform:scale(.94)}
+ body #__nuxt .ik-mobile-nav__item.is-active .ik-mobile-nav__label{color:inherit}
+}
+
+/* Center the mobile home label itself, not the combined icon + label group.
+   The icon sits beside the label without moving the breathing origin. */
+@media(max-width:1024px){
+ body #__nuxt .ik-mobile-nav__item:first-child .ik-mobile-nav__inner{position:relative;width:100%;height:100%;justify-content:center}
+ body #__nuxt .ik-mobile-nav__item:first-child .ik-mobile-nav__label{position:relative;left:2px}
+ body #__nuxt .ik-mobile-nav__item:first-child .ik-mobile-nav__icon{position:absolute;right:calc(50% + 15px)}
+}
+
+/* Green and gray share one rounded-slant path measured in CSS pixels.
+   No legacy capsule border or polygon clipping remains on the backing plates. */
+body .ik-header .ik-tab-highlight,
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab::before,
+body #__nuxt .ik-mobile-nav__item::before{margin-inline:calc(0px - var(--ik-plate-extra,0px));border:0;border-radius:0;clip-path:none;mask-image:var(--ik-plate-fill);-webkit-mask-image:var(--ik-plate-fill);mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat}
+body .ik-header .ik-header-tab:not(.is-active):is(:hover,:focus-visible) .ik-tab-highlight,
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab:not([data-state=active]):is(:hover,:focus-visible)::before,
+body #__nuxt .ik-mobile-nav__item:not(.is-active):is(:hover,:focus-visible)::before{background:#858585;border:0;animation:none;mask-image:var(--ik-plate-outline);-webkit-mask-image:var(--ik-plate-outline)}
+
+/* The button itself is a transparent hit area, including active/hover states.
+   No legacy selected rectangle may show beneath the rounded-slant pseudo plate. */
+body .ik-home-container .ik-home-nav-hub .ik-stream-tab:is([data-state=active],[aria-selected=true]){background:transparent;border:0;box-shadow:none}

@@ -1,0 +1,17 @@
+{
+  "name": "interknot-zzz-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=../.env index.mjs",
+    "test": "node test.mjs",
+    "build:web": "node build-web.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

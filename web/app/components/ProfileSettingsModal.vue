@@ -1,0 +1,840 @@
+<script setup lang="ts">
+import { useMessage } from "zenless-ui";
+import { watch } from "vue";
+import { resolveErrorMessage } from "~/utils/api-error";
+
+const props = defineProps<{
+  currentName?: string;
+  currentBio?: string;
+  currentHidden?: boolean;
+  initialSub?: string;
+}>();
+
+const emit = defineEmits<{
+  close: [];
+  nameUpdated: [name: string];
+  bioUpdated: [bio: string];
+  hiddenUpdated: [hidden: boolean];
+  posts: [];
+}>();
+
+const route = useRoute();
+const router = useRouter();
+const api = useApi();
+const message = useMessage();
+const authStore = useAuthStore();
+
+const modalQuery = computed(() => String(route.query.modal || ''));
+const showEditName = computed(() => modalQuery.value === 'edit-name');
+const showEditBio = computed(() => modalQuery.value === 'edit-bio');
+const showSocial = computed(() => modalQuery.value === 'social');
+const showLogout = computed(() => modalQuery.value === 'logout');
+
+const openSub = (name: string) => {
+  router.replace({ query: { ...route.query, modal: name } });
+};
+const closeSub = () => {
+  router.replace({ query: { ...route.query, modal: 'settings' } });
+};
+
+// Navigate directly to sibling modals (avatar / business card) on mobile,
+// where the bottom action bar is hidden in favour of these menu entries.
+const openAvatarModal = () => {
+  router.replace({ query: { ...route.query, modal: 'avatar' } });
+};
+const openCardModal = () => {
+  router.replace({ query: { ...route.query, modal: 'banner' } });
+};
+
+const nameInput = ref(props.currentName || "");
+const saving = ref(false);
+
+const bioInput = ref(props.currentBio || "");
+const savingBio = ref(false);
+
+const NAME_MAX = 20;
+const BIO_MAX = 100;
+
+const handleClose = () => {
+  emit("close");
+};
+
+const logoutOption = ref('home');
+
+const openLogout = () => {
+  logoutOption.value = 'home';
+  openSub('logout');
+};
+const closeLogout = () => {
+  closeSub();
+};
+const confirmLogout = async () => {
+  const revoked = await authStore.logout();
+  if (!revoked) message.warning("已在本地退出，网络恢复后将自动同步");
+  emit("close");
+  await router.replace("/");
+};
+
+const openEditName = () => {
+  nameInput.value = props.currentName || "";
+  openSub('edit-name');
+};
+
+const closeEditName = () => {
+  closeSub();
+};
+
+const submitName = async () => {
+  const trimmed = nameInput.value.trim();
+  if (!trimmed) {
+    message.warning("用户名不能为空");
+    return;
+  }
+  if (trimmed.length > NAME_MAX) {
+    message.warning(`用户名不能超过 ${NAME_MAX} 个字符`);
+    return;
+  }
+  if (trimmed === props.currentName) {
+    message.warning("未做任何修改");
+    closeEditName();
+    return;
+  }
+  saving.value = true;
+  try {
+    const result = await api.updateMyName(trimmed);
+    emit("nameUpdated", result.name);
+    message.success("用户名修改成功");
+    closeEditName();
+    handleClose();
+  } catch (err) {
+    message.error(resolveErrorMessage(err, "修改用户名失败"));
+  } finally {
+    saving.value = false;
+  }
+};
+
+const openEditBio = () => {
+  bioInput.value = props.currentBio || "";
+  openSub('edit-bio');
+};
+
+const closeEditBio = () => {
+  closeSub();
+};
+
+const submitBio = async () => {
+  const trimmed = bioInput.value.trim();
+  if (trimmed.length > BIO_MAX) {
+    message.warning(`签名不能超过 ${BIO_MAX} 个字符`);
+    return;
+  }
+  if (trimmed === (props.currentBio || "")) {
+    message.warning("未做任何修改");
+    closeEditBio();
+    return;
+  }
+  savingBio.value = true;
+  try {
+    const result = await api.updateMyBio(trimmed);
+    emit("bioUpdated", result.bio);
+    message.success("签名修改成功");
+    closeEditBio();
+    handleClose();
+  } catch (err) {
+    message.error(resolveErrorMessage(err, "修改签名失败"));
+  } finally {
+    savingBio.value = false;
+  }
+};
+
+// 父页面负责先去掉 ?modal 再跳转，避免返回主页时菜单重新弹出。
+const openAllPosts = () => {
+  emit("posts");
+};
+
+// ── 账号中心（独立页面） ──────────────
+const openAccountCenter = () => {
+  emit("close");
+  void navigateTo("/account");
+};
+
+const hidden = ref(!!props.currentHidden);
+const togglingHidden = ref(false);
+
+watch(
+  () => props.currentHidden,
+  (val) => {
+    hidden.value = !!val;
+  },
+);
+
+const openSocial = () => {
+  hidden.value = !!props.currentHidden;
+  openSub('social');
+};
+
+const closeSocial = () => {
+  closeSub();
+};
+
+// z-switch 的语义是"公开"(ON=公开，OFF=隐藏)，所以需要反转
+const publicSwitch = computed<boolean>({
+  get: () => !hidden.value,
+  set: (nextPublic) => {
+    void applyVisibility(!nextPublic);
+  },
+});
+
+const applyVisibility = async (nextHidden: boolean) => {
+  if (togglingHidden.value) return;
+  const prev = hidden.value;
+  hidden.value = nextHidden; // 乐观更新
+  togglingHidden.value = true;
+  try {
+    const result = await api.updateMyVisibility(nextHidden);
+    hidden.value = result.profileHidden;
+    emit("hiddenUpdated", result.profileHidden);
+    message.success(result.profileHidden ? "已隐藏个人资料" : "已公开个人资料");
+  } catch (err) {
+    hidden.value = prev; // 回滚
+    message.error(resolveErrorMessage(err, "修改失败"));
+  } finally {
+    togglingHidden.value = false;
+  }
+};
+
+const handleSocialOverlayClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).classList.contains("ik-overlay")) {
+    closeSocial();
+  }
+};
+
+const handleEditBioOverlayClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).classList.contains("ik-overlay")) {
+    closeEditBio();
+  }
+};
+
+const handleOverlayClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).classList.contains("ik-overlay")) {
+    handleClose();
+  }
+};
+
+const handleEditNameOverlayClick = (e: MouseEvent) => {
+  if ((e.target as HTMLElement).classList.contains("ik-overlay")) {
+    closeEditName();
+  }
+};
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Escape") {
+    if (showLogout.value) {
+      closeLogout();
+    } else if (showSocial.value) {
+      closeSocial();
+    } else if (showEditBio.value) {
+      closeEditBio();
+    } else if (showEditName.value) {
+      closeEditName();
+    } else {
+      handleClose();
+    }
+  }
+};
+
+// 如果从 URL 直接进入子弹窗，初始化对应状态
+watch(
+  () => props.initialSub,
+  (sub) => {
+    if (sub === 'edit-name') nameInput.value = props.currentName || '';
+    if (sub === 'edit-bio') bioInput.value = props.currentBio || '';
+    if (sub === 'social') hidden.value = !!props.currentHidden;
+  },
+  { immediate: true },
+);
+
+// 锁住 body 滚动，避免弹窗打开时滚轮事件穿透到下方页面
+const { acquire, release } = useBodyScrollLock();
+const SCROLL_LOCK_TOKEN = Symbol("profile-settings-modal");
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeydown);
+  acquire(SCROLL_LOCK_TOKEN);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+  release(SCROLL_LOCK_TOKEN);
+});
+</script>
+
+<template>
+  <div class="ik-overlay" @click="handleOverlayClick">
+    <div class="ik-overlay__stripe" aria-hidden="true"></div>
+
+    <div class="ik-dialog ik-dialog--settings" @click.stop>
+      <div class="ik-dialog__outer">
+        <div class="ik-dialog__inner">
+          <!-- Header -->
+          <div class="ik-dialog__header">
+            <span class="ik-dialog__title">更多操作</span>
+            <button class="ik-dialog__close" aria-label="关闭" @click="handleClose">
+              <img src="/images/close-btn.webp" alt="关闭" class="ik-dialog__close-img" draggable="false" />
+            </button>
+          </div>
+
+          <!-- Menu Body -->
+          <div class="ik-dialog__body">
+            <IkZzzMarquee />
+            <div class="ik-settings__list">
+              <!-- Mobile-only: appearance actions normally living in the
+                   bottom action bar on desktop. -->
+              <z-button class="ik-settings__action--mobile" @click="openAvatarModal">修改头像</z-button>
+              <z-button class="ik-settings__action--mobile" disabled>修改称号</z-button>
+              <z-button class="ik-settings__action--mobile" disabled>修改勋章</z-button>
+              <z-button class="ik-settings__action--mobile" @click="openCardModal">修改名片</z-button>
+              <z-button @click="openAllPosts">全部委托</z-button>
+              <z-button @click="openEditName">修改用户名</z-button>
+              <z-button @click="openEditBio">修改签名</z-button>
+              <z-button @click="openSocial">社交设置</z-button>
+              <z-button @click="openAccountCenter">账号中心</z-button>
+              <z-button @click="openLogout">退出登录</z-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Name Sub-dialog -->
+    <Teleport to="body">
+      <Transition name="ik-overlay" appear>
+        <div v-if="showEditName" class="ik-overlay ik-overlay--sub" @click="handleEditNameOverlayClick">
+          <div class="ik-overlay__stripe" aria-hidden="true"></div>
+          <div class="ik-dialog" @click.stop>
+            <div class="ik-dialog__outer">
+              <div class="ik-dialog__inner">
+                <div class="ik-dialog__header">
+                  <span class="ik-dialog__title">修改用户名</span>
+                  <button class="ik-dialog__close" aria-label="关闭" @click="closeEditName">
+                    <img src="/images/close-btn.webp" alt="关闭" class="ik-dialog__close-img" draggable="false" />
+                  </button>
+                </div>
+                <div class="ik-dialog__body">
+                  <IkZzzMarquee />
+                  <div class="ik-edit-name__wrapper">
+                    <div class="ik-edit-name">
+                      <div class="ik-edit-name__field">
+                        <z-input
+                          v-model="nameInput"
+                          :maxlength="NAME_MAX"
+                          placeholder="请输入新用户名"
+                          :disabled="saving"
+                          clearable
+                          @keydown.enter="submitName"
+                        />
+                      </div>
+                      <div class="ik-edit-name__meta">
+                        <span class="ik-edit-name__count">{{ nameInput.trim().length }}/{{ NAME_MAX }}</span>
+                        <div class="ik-edit-name__cost">
+                          <span class="ik-edit-name__cost-amount">10</span>
+                          <img src="/images/materials/dennies_v2.webp" alt="Dennies" class="ik-edit-name__cost-img" draggable="false" />
+                        </div>
+                      </div>
+                    </div>
+                    <z-button
+                      class="ik-edit-name__submit"
+                      :icon="{ success: '#00cc0d' }"
+                      :disabled="saving || !nameInput.trim()"
+                      @click="submitName"
+                    >
+                      {{ saving ? '保存中...' : '确定' }}
+                    </z-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+    <!-- Edit Bio Sub-dialog -->
+    <Teleport to="body">
+      <Transition name="ik-overlay" appear>
+        <div v-if="showEditBio" class="ik-overlay ik-overlay--sub" @click="handleEditBioOverlayClick">
+          <div class="ik-overlay__stripe" aria-hidden="true"></div>
+          <div class="ik-dialog" @click.stop>
+            <div class="ik-dialog__outer">
+              <div class="ik-dialog__inner">
+                <div class="ik-dialog__header">
+                  <span class="ik-dialog__title">修改签名</span>
+                  <button class="ik-dialog__close" aria-label="关闭" @click="closeEditBio">
+                    <img src="/images/close-btn.webp" alt="关闭" class="ik-dialog__close-img" draggable="false" />
+                  </button>
+                </div>
+                <div class="ik-dialog__body">
+                  <IkZzzMarquee />
+                  <div class="ik-edit-name__wrapper">
+                    <div class="ik-edit-name">
+                      <div class="ik-edit-name__field">
+                        <z-textarea
+                          v-model="bioInput"
+                          :maxlength="BIO_MAX"
+                          placeholder="请输入新签名"
+                          :disabled="savingBio"
+                        />
+                      </div>
+                      <div class="ik-edit-name__meta">
+                        <span class="ik-edit-name__count">{{ bioInput.trim().length }}/{{ BIO_MAX }}</span>
+                      </div>
+                    </div>
+                    <z-button
+                      class="ik-edit-name__submit"
+                      :icon="{ success: '#00cc0d' }"
+                      :disabled="savingBio"
+                      @click="submitBio"
+                    >
+                      {{ savingBio ? '保存中...' : '确定' }}
+                    </z-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Social Settings Sub-dialog -->
+    <Teleport to="body">
+      <Transition name="ik-overlay" appear>
+        <div v-if="showSocial" class="ik-overlay ik-overlay--sub" @click="handleSocialOverlayClick">
+          <div class="ik-overlay__stripe" aria-hidden="true"></div>
+          <div class="ik-dialog ik-dialog--large" @click.stop>
+            <div class="ik-dialog__outer">
+              <div class="ik-dialog__inner">
+                <div class="ik-dialog__header">
+                  <span class="ik-dialog__title">社交设置</span>
+                  <button class="ik-dialog__close" aria-label="关闭" @click="closeSocial">
+                    <img src="/images/close-btn.webp" alt="关闭" class="ik-dialog__close-img" draggable="false" />
+                  </button>
+                </div>
+                <div class="ik-dialog__body">
+                  <IkZzzMarquee />
+                  <div class="ik-social">
+                    <div class="ik-social__row">
+                      <div class="ik-social__text">
+                        <span class="ik-social__label">公开个人资料</span>
+                        <span class="ik-social__desc">
+                          关闭后，其他用户访问你的主页将无法看到签名、统计数据、名片和发过的委托/评论。
+                        </span>
+                      </div>
+                      <z-switch
+                        v-model="publicSwitch"
+                        :disabled="togglingHidden"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Logout Sub-dialog -->
+    <Teleport to="body">
+      <Transition name="ik-overlay" appear>
+        <div v-if="showLogout" class="ik-overlay ik-overlay--sub" @click.self="closeLogout">
+          <div class="ik-overlay__stripe" aria-hidden="true"></div>
+          <div class="ik-dialog" @click.stop>
+            <div class="ik-dialog__outer">
+              <div class="ik-dialog__inner">
+                <div class="ik-dialog__header">
+                  <span class="ik-dialog__title">退出登录</span>
+                  <button class="ik-dialog__close" aria-label="关闭" @click="closeLogout">
+                    <img src="/images/close-btn.webp" alt="关闭" class="ik-dialog__close-img" draggable="false" />
+                  </button>
+                </div>
+                <div class="ik-dialog__body">
+                  <IkZzzMarquee />
+                  <div class="ik-logout__wrapper">
+                    <div class="ik-logout__inner">
+                      <div class="ik-logout__options">
+                        <z-radio v-model="logoutOption" value="home">返回首页并清除登录记录</z-radio>
+                      </div>
+                    </div>
+                    <div class="ik-logout__actions">
+                      <z-button :icon="{ error: '#ff4444' }" @click="closeLogout">取消</z-button>
+                      <z-button :icon="{ success: '#00cc0d' }" @click="confirmLogout">确定</z-button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+  </div>
+</template>
+
+<style scoped>
+/* ═══════════════════════════════════════════════
+   Overlay — 与委托弹窗 / 登录弹窗完全一致
+   ═══════════════════════════════════════════════ */
+.ik-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.ik-overlay__stripe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    40deg,
+    transparent,
+    transparent 3.5px,
+    rgba(255, 255, 255, 0.09) 4.5px,
+    rgba(255, 255, 255, 0.09) 7.5px,
+    transparent 8.5px
+  );
+}
+
+/* ── Dialog Shell ──────────────────────────────── */
+.ik-dialog {
+  position: relative;
+  width: 450px;
+  max-width: 90%;
+  height: 300px;
+  max-height: 90%;
+  will-change: transform;
+}
+
+.ik-dialog__outer {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  background: #2D2C2D;
+  border-radius: 24px 0 24px 24px;
+  overflow: hidden;
+}
+
+.ik-dialog__inner {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  background: #000;
+  border-radius: 22px 0 22px 22px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ────────────────────────────────────── */
+.ik-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 12px 24px;
+  flex-shrink: 0;
+  border-radius: 18px 0 0 0;
+  background:
+    url("/images/tab-bg-point.webp") repeat,
+    linear-gradient(180deg, #161616 0%, #080808 100%);
+}
+
+.ik-dialog__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.ik-dialog__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.ik-dialog__close:hover {
+  opacity: 0.85;
+  transform: scale(1.08);
+}
+
+.ik-dialog__close:active {
+  transform: scale(0.95);
+}
+
+.ik-dialog__close-img {
+  height: 32px;
+  width: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* ── Body ──────────────────────────────────────── */
+.ik-dialog__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  background: #121212;
+  border-radius: 0 0 18px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ik-settings__list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-width: 336px;
+  margin: 0 auto;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 16px;
+}
+
+.ik-settings__list :deep(.z-button) {
+  width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+}
+
+/* Appearance actions live in the bottom action bar on desktop, so
+   suppress them in the menu by default. */
+.ik-settings__action--mobile {
+  display: none;
+}
+
+/* ── Logout sub-dialog ── */
+.ik-logout__wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.ik-logout__inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 120px 24px 45px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 16px;
+}
+.ik-logout__options {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ik-logout__actions {
+  display: flex;
+  gap: 12px;
+  margin-top: -18px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Larger dialog variant (for settings pages) ── */
+.ik-dialog--large {
+  width: 50%;
+  height: 60%;
+}
+
+@media (max-width: 800px) {
+  .ik-dialog--large {
+    width: 92%;
+    height: 85%;
+  }
+}
+
+@media (max-width: 500px) {
+  .ik-dialog--large {
+    width: 100%;
+    height: 95%;
+  }
+}
+/* body 改为顶部对齐，方便未来放多项设置 */
+.ik-dialog--large .ik-dialog__body {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* ── Social Settings ─────────────────────────── */
+.ik-social {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 16px;
+}
+
+.ik-social__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ik-social__row:last-child {
+  border-bottom: none;
+}
+
+.ik-social__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ik-social__label {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.ik-social__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Edit Name Form ───────────────────────────── */
+.ik-edit-name {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 32px 20px 45px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 16px;
+}
+
+.ik-edit-name__field {
+  position: relative;
+}
+
+.ik-edit-name__field :deep(.z-input) {
+  width: 100%;
+}
+
+.ik-edit-name__meta {
+  display: flex;
+  justify-content: flex-end; /* 靠右侧对齐，使信息统一在右下角收束 */
+  align-items: center;
+  gap: 8px; /* 缩窄字数与费用的间距，使其靠得更近 */
+  margin-top: -6px;
+  width: 100%;
+}
+
+.ik-edit-name__cost {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ik-edit-name__cost-amount {
+  font-size: 12px; /* 调小至 12px，与字数统计（12px）完全等大对齐 */
+  font-weight: 700;
+  color: var(--ik-primary);
+}
+
+.ik-edit-name__cost-img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.ik-edit-name__count {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.ik-edit-name__wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.ik-edit-name__wrapper > :deep(.z-button) {
+  margin-top: -18px;
+  position: relative;
+  z-index: 1;
+  min-width: 70px;
+}
+
+/* 入场/出场动画统一在 theme.css 的 .ik-overlay-* 全局规则里维护 */
+
+/* ── Sub-overlay z-index boost ────────────────── */
+.ik-overlay--sub {
+  z-index: 9200;
+}
+
+/* ── Mobile / Portrait — show appearance actions in the menu ─── */
+@media (max-width: 1023px), (orientation: portrait) {
+  .ik-settings__action--mobile {
+    display: inline-flex;
+  }
+  /* Settings dialog grows from 6 to 10 entries; let it size to content
+     and stay within viewport rather than overflowing the fixed 300px. */
+  .ik-dialog--settings {
+    height: auto;
+    max-height: 90%;
+  }
+  .ik-dialog--settings .ik-dialog__body {
+    overflow-y: auto;
+    align-items: flex-start;
+  }
+}
+
+/* ── Mobile ───────────────────────────────────── */
+@media (max-width: 500px) {
+  .ik-dialog {
+    max-width: 100%;
+  }
+  /* Keep the ZZZ-style 3-rounded-corner frame on mobile; sub-dialogs
+     (edit name / bio / social / logout) are centered popups, not
+     fullscreen sheets. */
+}
+
+/* prefers-reduced-motion 由 theme.css 全局接管 */
+</style>

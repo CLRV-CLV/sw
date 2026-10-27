@@ -1,0 +1,429 @@
+<script lang="ts">
+const DEFAULT_COVER_IMAGE = "/images/default-cover.webp";
+const DEFAULT_AVATAR_IMAGE = "/images/default-avatar.webp";
+
+// 跨实例缓存已经加载过的封面 URL。虚拟列表在上下滚动时会反复挂载/卸载
+// PostCard，这个缓存能让“下滑时已经加载过”的封面在重新上翻进入视口时
+// 直接显示，不再重播 opacity 进场过渡。
+const _loadedCoverUrls = new Set<string>();
+
+function isCoverLoaded(src: string) {
+  return _loadedCoverUrls.has(src);
+}
+
+function markCoverLoaded(src: string) {
+  if (src) _loadedCoverUrls.add(src);
+}
+</script>
+
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { postExcerpt } from "~/utils/post-excerpt";
+import type { Post } from "~/types/entities";
+import { FALLBACK_COVER_ASPECT_RATIO, getNormalizedCoverAspectRatio } from "~/utils/cover";
+import { toCardCoverThumbUrl } from "~/utils/image";
+import UserHoverCard from "./UserHoverCard.vue";
+
+const { schedulePrefetch, cancelPrefetch } = usePostPrefetch();
+
+const props = defineProps<{
+  post: Post;
+  eager?: boolean;
+  highlighted?: boolean;
+}>();
+
+const emit = defineEmits<{
+  open: [post: Post, event: MouseEvent];
+}>();
+
+const excerpt = computed(() => postExcerpt(props.post.rawBodyText || props.post.bodyText || ""));
+
+const authorName = computed(() => props.post.author?.name || "未知作者");
+
+// 悬浮卡仅在支持悬停的设备（桌面鼠标）才有意义；触屏上它本就不弹，却仍会
+// 为每张卡片实例化多个 composable。用此开关在移动端彻底不挂载，省掉浪费。
+const canHover = useHoverCapable();
+const gpuAccelerated = useGpuAccelerated();
+
+const coverSrc = ref(DEFAULT_COVER_IMAGE);
+// 初始状态优先从跨实例缓存读取：如果同一张封面已经在本页面加载过，
+// 重新进入视口时不应再次展示 loading 态并重播过渡动画。
+const coverImageLoaded = ref(isCoverLoaded(coverSrc.value));
+const coverIsFallback = ref(false);
+const avatarSrc = ref(DEFAULT_AVATAR_IMAGE);
+
+const hasBackendCoverSize = computed(() =>
+  typeof props.post.coverWidth === "number" &&
+  typeof props.post.coverHeight === "number" &&
+  props.post.coverWidth > 0 &&
+  props.post.coverHeight > 0,
+);
+
+const coverAspectRatio = computed(() => {
+  // 只要后端提供了原图尺寸，就始终按原比例占位；即便缩略图加载失败（如七牛云对 10MB+
+  // 大图返回 "File too large"），也保持容器尺寸不变，避免瀑布流重排引发列表跳动。
+  // 仅当后端完全没有尺寸信息时，才回落到默认占位图的原生比例。
+  if (hasBackendCoverSize.value) {
+    return getNormalizedCoverAspectRatio(
+      props.post.coverWidth,
+      props.post.coverHeight,
+    );
+  }
+  return FALLBACK_COVER_ASPECT_RATIO;
+});
+
+const coverReady = computed(() => coverImageLoaded.value);
+
+watch(
+  () => [props.post.id, props.post.cover] as const,
+  ([newId, newCover], oldValue) => {
+    if (oldValue && newId === oldValue[0] && newCover === oldValue[1]) return;
+    const cover = newCover?.trim();
+    // 瀑布流卡片尺寸不大，使用缩略图避免在 CPU / 无 GPU 路径下解码和绘制超大原图。
+    coverSrc.value = cover ? toCardCoverThumbUrl(cover, gpuAccelerated.value) : DEFAULT_COVER_IMAGE;
+    coverIsFallback.value = !cover;
+    // 同一封面 URL 已加载过时，直接就绪，避免虚拟列表重挂载时重播过渡。
+    coverImageLoaded.value = isCoverLoaded(coverSrc.value);
+  },
+  { immediate: true },
+);
+
+
+
+watch(
+  () => [props.post.id, props.post.author?.avatar] as const,
+  () => {
+    avatarSrc.value = props.post.author?.avatar || DEFAULT_AVATAR_IMAGE;
+  },
+  { immediate: true },
+);
+
+const onCoverLoad = () => {
+  coverImageLoaded.value = true;
+  markCoverLoaded(coverSrc.value);
+};
+
+const onCoverError = () => {
+  if (coverSrc.value === DEFAULT_COVER_IMAGE) {
+    coverImageLoaded.value = true;
+    markCoverLoaded(coverSrc.value);
+    return;
+  }
+
+  coverSrc.value = DEFAULT_COVER_IMAGE;
+  coverIsFallback.value = true;
+  coverImageLoaded.value = true;
+  markCoverLoaded(coverSrc.value);
+};
+
+const onAvatarError = () => {
+  avatarSrc.value = DEFAULT_AVATAR_IMAGE;
+};
+
+const handleOpen = (e: MouseEvent) => {
+  emit("open", props.post, e);
+};
+</script>
+
+<template>
+  <article
+    class="ik-card"
+    :class="{ 'ik-card--updated': highlighted }"
+    @click.capture="handleOpen"
+    @mouseenter="schedulePrefetch(post.id)"
+    @mouseleave="cancelPrefetch"
+    @focusin="schedulePrefetch(post.id)"
+    @focusout="cancelPrefetch"
+  >
+    <NuxtLink
+      :to="`/post/${post.id}`"
+      class="ik-card__link"
+      no-prefetch
+    >
+      <div class="ik-card__cover-wrap">
+        <div class="ik-card__cover-frame" :style="{ aspectRatio: String(coverAspectRatio) }">
+          <img
+            :src="coverSrc"
+            :alt="coverIsFallback ? 'default cover' : post.title"
+            :class="['ik-card__cover', { 'ik-card__cover--fallback': coverIsFallback, 'ik-card__cover--loading': !coverReady }]"
+            :loading="eager ? 'eager' : 'lazy'"
+            decoding="async"
+            :fetchpriority="eager ? 'high' : 'low'"
+            referrerpolicy="no-referrer"
+            @load="onCoverLoad"
+            @error="onCoverError"
+          />
+        </div>
+        <div class="ik-card__views">
+          <svg
+            class="ik-card__views-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path d="M4 4h16v12H10l-5 4v-4H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+          </svg>
+          <span>{{ post.commentsCount || 0 }}</span>
+        </div>
+        <div v-if="post.solvedAt" class="ik-card__solved">已采纳</div>
+      </div>
+
+      <div class="ik-card__body">
+        <div class="ik-card__author-row">
+          <UserHoverCard v-if="canHover" :author-id="post.author?.documentId">
+            <div class="ik-card__avatar-shell">
+              <img
+                :src="avatarSrc"
+                :alt="authorName"
+                class="ik-card__avatar-image"
+                loading="lazy"
+                decoding="async"
+                @error="onAvatarError"
+              />
+            </div>
+          </UserHoverCard>
+          <div v-else class="ik-card__avatar-shell">
+            <img
+              :src="avatarSrc"
+              :alt="authorName"
+              class="ik-card__avatar-image"
+              loading="lazy"
+              decoding="async"
+              @error="onAvatarError"
+            />
+          </div>
+          <div class="ik-card__author-block">
+            <UserHoverCard v-if="canHover" :author-id="post.author?.documentId">
+              <p class="ik-card__author-name">{{ authorName }}</p>
+            </UserHoverCard>
+            <p v-else class="ik-card__author-name">{{ authorName }}</p>
+            <div class="ik-card__author-divider" />
+          </div>
+        </div>
+
+        <h3 class="ik-card__title" :class="{ 'ik-card__title--read': post.isRead }">
+          <span v-if="post.category" class="ik-card__title-cat">[{{ post.category.name }}]</span>{{ post.title }}
+        </h3>
+        <p v-if="excerpt" class="ik-card__excerpt">{{ excerpt }}</p>
+      </div>
+    </NuxtLink>
+  </article>
+</template>
+
+<style scoped>
+.ik-card {
+  position: relative;
+  border-radius: var(--ik-post-card-radius);
+  background: var(--ik-post-card-outer-bg);
+  padding: var(--ik-post-card-padding);
+  overflow: hidden;
+  contain: layout style paint;
+}
+
+/* 新帖高亮的彩色外框画在内容「之上」，并向内多压 1px。
+   若像以前那样改外层背景色，内层圆角裁剪的抗锯齿边缘会混入内层的深色背景
+   （#222 / 封面底色），在彩框与封面之间留下一条暗线，小数像素布局和
+   Windows 缩放下尤其明显。 */
+.ik-card--updated::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 calc(var(--ik-post-card-padding) + 1px) var(--ik-post-card-updated-bg, var(--ik-primary));
+  pointer-events: none;
+  animation: ik-card-highlight-fade 3s ease-out forwards;
+}
+
+@keyframes ik-card-highlight-fade {
+  0% {
+    opacity: 0;
+    animation-timing-function: ease-out;
+  }
+  16% {
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  42% {
+    opacity: 1;
+    animation-timing-function: ease-out;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ik-card--updated::before {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.ik-card__link {
+  position: relative;
+  z-index: 1;
+  display: block;
+  border-radius: var(--ik-post-card-inner-radius);
+  background: var(--ik-post-card-inner-bg);
+  overflow: hidden;
+  outline: none;
+}
+
+.ik-card__cover-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.ik-card__cover-frame {
+  width: 100%;
+  background: var(--ik-post-card-cover-bg);
+}
+
+.ik-card__solved {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.ik-card__title-cat {
+  margin-right: 4px;
+}
+
+:deep(.ik-card__cover) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  transition: opacity 400ms ease;
+}
+
+:deep(.ik-card__cover--loading) {
+  opacity: 0;
+}
+
+/* fallback 时 frame 已切换为占位图原生比例，
+   占位图天然填满 frame，沿用 object-fit: cover 即可 */
+:deep(.ik-card__cover--fallback) {
+  background: var(--ik-post-card-cover-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :deep(.ik-card__cover) {
+    transition: none;
+  }
+}
+
+.ik-card__views {
+  position: absolute;
+  top: 11px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #fff;
+  font-size: var(--ik-post-card-views-font-size);
+  font-weight: 700;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.ik-card__views-icon {
+  width: var(--ik-post-card-views-icon-size);
+  height: var(--ik-post-card-views-icon-size);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6))
+          drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+}
+
+.ik-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ik-post-card-body-gap);
+  padding: var(--ik-post-card-body-padding);
+}
+
+.ik-card__author-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+.ik-card__avatar-shell {
+  position: relative;
+  margin-top: var(--ik-post-card-avatar-offset);
+  width: var(--ik-post-card-avatar-size);
+  height: var(--ik-post-card-avatar-size);
+  padding: var(--ik-post-card-avatar-padding);
+  border-radius: 999px;
+  background: var(--ik-post-card-inner-bg);
+}
+
+.ik-card__avatar-image {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  object-fit: cover;
+  background: var(--ik-post-card-avatar-bg);
+}
+
+.ik-card__author-block {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--ik-post-card-author-min-height);
+  padding-left: var(--ik-post-card-author-padding-left);
+  margin-left: var(--ik-post-card-author-offset);
+  width: var(--ik-post-card-author-block-width);
+}
+
+.ik-card__author-name {
+  margin: 4px 0 4px;
+  font-size: var(--ik-post-card-author-name-size);
+  font-weight: 700;
+  color: var(--ik-post-card-author-name-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ik-card__author-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--ik-post-card-divider-bg);
+}
+
+.ik-card__title {
+  margin: 0;
+  font-size: var(--ik-post-card-title-size);
+  /* h3 浏览器默认 700 会落到品牌粗档；瀑布流标题字号小（17px），
+     粗档在小字号下发糊难认，显式降到 600 落细档，清晰。
+     （详情页大标题字号大，仍用粗档，不受此影响。） */
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ik-post-card-title-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.ik-card__title--read {
+  color: var(--ik-post-card-title-read-color);
+}
+
+</style>

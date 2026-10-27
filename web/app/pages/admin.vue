@@ -1,0 +1,48 @@
+<script setup lang="ts">
+const auth = useAuthStore(), login = useLoginDialog();
+type Section = 'posts' | 'comments' | 'users' | 'audit';
+interface Row { id: string; title?: string; body?: string; status?: string; username?: string; role?: string; banned?: boolean; sessions?: number; action?: string; target?: string; createdAt?: string; actor?: string }
+interface Overview { actor: string; counts: Record<string, number>; settings: { registrationOpen: boolean; postingOpen: boolean } }
+const overview = ref<Overview | null>(null), section = ref<Section>('posts'), rows = ref<Row[]>([]), page = ref(1), total = ref(0), busy = ref(false), error = ref(''), denied = ref(false), editing = ref<Row | null>(null);
+function message(e: unknown) { const err = e as { data?: { detail?: string }; statusCode?: number }; if (err.statusCode === 403) denied.value = true; return err.data?.detail || '请求失败，请检查服务或登录状态'; }
+async function load() {
+  busy.value = true; error.value = ''; denied.value = false;
+  try { overview.value = await $fetch<Overview>('/v1/admin/overview'); const data = await $fetch<{items:Row[]; total:number}>(`/v1/admin/${section.value}`, { query: { page: page.value } }); rows.value = data.items; total.value = data.total; }
+  catch(e) { error.value = message(e); rows.value = []; overview.value = null; } finally { busy.value = false; }
+}
+async function mutate(url: string, method: 'PATCH' | 'DELETE', body?: Record<string, unknown>) {
+  busy.value = true; error.value = '';
+  try { await $fetch(url, { method, body }); editing.value = null; await load(); }
+  catch(e) { error.value = message(e); } finally { busy.value = false; }
+}
+function choose(value: Section) { section.value = value; page.value = 1; editing.value = null; load(); }
+function remove(row: Row) { if (window.confirm(`永久删除 ${row.title || row.id}？相关评论与互动也会清除，此操作不能撤销。`)) mutate(`/v1/admin/${section.value}/${encodeURIComponent(row.id)}`, 'DELETE'); }
+function userChange(row: Row, body: Record<string, unknown>) { if (window.confirm(`确定修改用户 ${row.username}？`)) mutate(`/v1/admin/users/${encodeURIComponent(row.id)}`, 'PATCH', body); }
+function revoke(row: Row) { if (window.confirm(`注销 ${row.username} 的所有会话？`)) mutate(`/v1/admin/users/${encodeURIComponent(row.id)}/sessions`, 'DELETE'); }
+function save() { if (!editing.value) return; const { id, title, body, status } = editing.value; mutate(`/v1/admin/${section.value}/${encodeURIComponent(id)}`, 'PATCH', section.value === 'posts' ? { title, body, status } : { body }); }
+onMounted(() => { if (auth.isLogin) load(); });
+watch(() => auth.isLogin, active => { if (active) load(); else { overview.value = null; rows.value = []; } });
+</script>
+<template>
+  <section class="admin">
+    <header><small>HDD / CONTROL CENTER</small><h1>绳网 · 管理后台</h1><p>管理当前站点的数据与权限。管理员操作均由服务端授权并写入日志。</p><nav><NuxtLink to="/">← 绳网</NuxtLink><a href="/web/admin" target="_top">桌面后台</a><a href="/h5/admin" target="_top">手机后台</a></nav></header>
+    <article v-if="!auth.isLogin"><h2>请先登录本站</h2><p>只有管理员账号可进入，普通账号不能通过修改页面绕过权限。</p><button @click="login.open()">登录</button></article>
+    <p v-if="error" role="alert">{{ error }}</p>
+    <article v-if="denied"><h2>需要管理员权限</h2><p>全新站点默认首个注册用户成为管理员；已有用户的站点不会自动补授权。部署者也可用 ADMIN_USERNAMES 指定已注册账号。本站没有预置管理员密码。</p></article>
+    <template v-if="overview">
+      <div class="stats"><article v-for="(count,key) in overview.counts" :key="key"><small>{{ key }}</small><strong>{{ count }}</strong></article></div>
+      <article><h2>站点设置</h2><p>当前管理员：{{ overview.actor }}</p><button :disabled="busy" @click="mutate('/v1/admin/settings','PATCH',{registrationOpen:!overview.settings.registrationOpen})">注册：{{ overview.settings.registrationOpen ? '开放' : '关闭' }}</button><button :disabled="busy" @click="mutate('/v1/admin/settings','PATCH',{postingOpen:!overview.settings.postingOpen})">普通用户新建帖子：{{ overview.settings.postingOpen ? '开放' : '关闭' }}</button><p>默认帖子是本地种子演示数据，不是抓取真实用户的内容。删除后不会因重启而重新出现。</p></article>
+      <nav class="tabs" aria-label="后台栏目"><button v-for="item in (['posts','comments','users','audit'] as const)" :key="item" :aria-pressed="section===item" :disabled="busy" @click="choose(item)">{{ {posts:'帖子',comments:'评论',users:'用户 / 会话',audit:'操作日志'}[item] }}</button><button :disabled="busy" @click="load">刷新</button></nav>
+      <article v-if="editing" class="editor"><h2>编辑{{ section === 'posts' ? '帖子' : '评论' }}</h2><label v-if="section === 'posts'">标题<input v-model="editing.title" maxlength="200"></label><label>正文（源文本）<textarea v-model="editing.body" rows="10" maxlength="500000" /></label><label v-if="section === 'posts'">状态<select v-model="editing.status"><option value="published">公开</option><option value="draft">草稿 / 下架</option></select></label><button :disabled="busy" @click="save">保存</button><button @click="editing=null">取消</button></article>
+      <div class="rows"><article v-for="row in rows" :key="row.id">
+        <template v-if="section === 'users'"><h2>{{ row.username }}</h2><p>{{ row.role === 'admin' ? '管理员' : '普通用户' }} · {{ row.banned ? '已封禁' : '正常' }} · 有效会话 {{ row.sessions }}</p><button :disabled="busy" @click="userChange(row,{banned:!row.banned})">{{ row.banned ? '解除封禁' : '封禁' }}</button><button :disabled="busy" @click="userChange(row,{role:row.role==='admin'?'user':'admin'})">{{ row.role==='admin'?'取消管理权限':'设为管理员' }}</button><button :disabled="busy" @click="revoke(row)">注销全部会话</button></template>
+        <template v-else-if="section === 'audit'"><h3>{{ row.action }}</h3><p>操作人 {{ row.actor }}<br>目标 {{ row.target }}<br>{{ row.createdAt }}</p></template>
+        <template v-else><h2>{{ row.title || '评论' }}</h2><small>{{ row.id }} · {{ row.status }}</small><p class="excerpt">{{ row.body }}</p><button :disabled="busy" @click="editing={...row}">编辑</button><button v-if="section==='posts'" :disabled="busy" @click="mutate(`/v1/admin/posts/${encodeURIComponent(row.id)}`,'PATCH',{status:row.status==='published'?'draft':'published'})">{{ row.status==='published'?'下架':'公开' }}</button><button class="danger" :disabled="busy" @click="remove(row)">永久删除</button></template>
+      </article></div><p v-if="!rows.length && !busy">暂无记录</p><footer><button :disabled="busy || page<=1" @click="page--;load()">上一页</button><span>第 {{ page }} 页 · 共 {{ total }} 条</span><button :disabled="busy || page*30>=total" @click="page++;load()">下一页</button></footer>
+    </template>
+    <p v-if="busy" role="status">正在处理…</p>
+  </section>
+</template>
+<style scoped>
+.admin{max-width:1500px;margin:auto;padding:28px 20px 110px;color:#ddd}.admin h1{color:#d7fa00;font-size:32px}.admin header small{letter-spacing:3px}.admin nav,.admin footer{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.admin a{color:#d7fa00}.admin article{background:#202220;border:2px solid #3c4038;padding:20px;border-radius:22px;margin:16px 0;min-width:0}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.stats strong{display:block;font-size:32px;color:#d7fa00}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}.admin button{border-radius:999px;background:#d7fa00;color:#14180b;border:1px solid #64704d;padding:9px 14px;font-weight:700;margin:4px;cursor:pointer}.admin button:disabled{opacity:.45;cursor:default}.tabs button[aria-pressed=false]{background:#202220;color:#ccc}.admin .danger{background:#ffc0a5}.admin [role=alert]{background:#3c2420;padding:16px;color:#ffb99c}.admin p{line-height:1.7;overflow-wrap:anywhere}.excerpt{white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}.admin label{display:block;margin:14px 0}.admin input,.admin textarea,.admin select{display:block;width:100%;box-sizing:border-box;border:1px solid #555;background:#111;color:#eee;padding:12px;border-radius:10px}.editor{max-width:1000px}.admin small{overflow-wrap:anywhere}@media(max-width:768px){.stats{grid-template-columns:repeat(2,1fr)}.admin{padding:18px 12px 100px}.admin h1{font-size:27px}}
+</style>

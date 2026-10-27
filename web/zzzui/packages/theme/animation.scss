@@ -1,0 +1,88 @@
+@keyframes z_ani_background {
+  from { background: $--gradient-yellow; }
+  to { background: $--gradient-green; }
+}
+@keyframes z_ani_border_color {
+  from { border-color: $--gradient-yellow; }
+  to { border-color: $--gradient-green; }
+}
+@keyframes z_ani_color {
+  from { color: $--gradient-yellow; }
+  to { color: $--gradient-green; }
+}
+@keyframes z_ani_outline_color {
+  from { outline-color: $--gradient-yellow; }
+  to { outline-color: $--gradient-green; }
+}
+@keyframes z_ani_size {
+  0% {
+    transform: scale(1.1);
+    animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  }
+  50% {
+    transform: scale(1.25);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  100% {
+    transform: scale(1.1);
+  }
+}
+@keyframes z_ani_skew_size {
+  0% {
+    transform: skew(-20deg) scale(1.1);
+    animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  }
+  50% {
+    transform: skew(-20deg) scale(1.25);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  100% {
+    transform: skew(-20deg) scale(1.1);
+  }
+}
+@keyframes z_ani_loading {
+  from { transform: rotate(0); }
+  to { transform: rotate(1turn); }
+}
+@keyframes z_ani_outline_size {
+  0% {
+    outline-width: 2px;
+    animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  }
+  50% {
+    outline-width: 8px;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  100% {
+    outline-width: 2px;
+  }
+}
+
+// Respect the user's "reduce motion" preference: flatten the infinite
+// "breathing" color/size animations so active elements keep a static,
+// high-contrast highlight instead of continuously pulsing between two
+// colors (perceived as flicker). The functional spinner (z_ani_loading)
+// is intentionally left running.
+@media (prefers-reduced-motion: reduce) {
+  @keyframes z_ani_background {
+    from, to { background: $--gradient-yellow; }
+  }
+  @keyframes z_ani_border_color {
+    from, to { border-color: $--gradient-yellow; }
+  }
+  @keyframes z_ani_color {
+    from, to { color: $--gradient-yellow; }
+  }
+  @keyframes z_ani_outline_color {
+    from, to { outline-color: $--gradient-yellow; }
+  }
+  @keyframes z_ani_size {
+    from, to { transform: scale(1.1); }
+  }
+  @keyframes z_ani_skew_size {
+    from, to { transform: skew(-20deg) scale(1.1); }
+  }
+  @keyframes z_ani_outline_size {
+    from, to { outline-width: 2px; }
+  }
+}

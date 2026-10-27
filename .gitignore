@@ -1,0 +1,15 @@
+node_modules/
+.nuxt/
+.output/
+server/data/
+server/public/
+__pycache__/
+*.log
+
+web/.vitest/
+
+.env
+.env.*
+!.env.example
+backups/
+.update.lock
