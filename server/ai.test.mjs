@@ -477,7 +477,11 @@ test("Moegirl catalog validates real character pages and rejects organisations, 
     ["艾莲·乔"],
   );
   assert.equal(result.truncated, false);
-  assert.equal(requests.length, 4);
+  assert.equal(result.examined, 3);
+  assert.equal(result.skippedNonCharacter, 2);
+  assert.equal(result.pageFailures, 0);
+  // Category API + 3 article checks + navbox template page.
+  assert.equal(requests.length, 5);
 });
 test("AI site budget applies across accounts; editing dossier invalidates approval; missing wiki approval cannot be bypassed", async () => {
   const f = fixture({ AI_DAILY_CHAT_LIMIT: "1" });
@@ -959,16 +963,14 @@ test("Moegirl upgrade forcibly clears every old role exactly once and keeps post
     f.db
       .prepare("DELETE FROM ai_migrations WHERE key='moegirl-catalog-v1'")
       .run();
-    f.db
-      .prepare("INSERT INTO posts VALUES(?,?)")
-      .run(
-        "historical",
-        JSON.stringify({
-          id: "historical",
-          authorId: "ai:ellen-joe",
-          body: "kept",
-        }),
-      );
+    f.db.prepare("INSERT INTO posts VALUES(?,?)").run(
+      "historical",
+      JSON.stringify({
+        id: "historical",
+        authorId: "ai:ellen-joe",
+        body: "kept",
+      }),
+    );
     f.db
       .prepare("INSERT INTO ai_messages VALUES(?,?,?,?,?,?)")
       .run(
@@ -984,16 +986,14 @@ test("Moegirl upgrade forcibly clears every old role exactly once and keeps post
     assert.equal(f.db.prepare("SELECT count(*) n FROM ai_roles").get().n, 0);
     assert.equal(f.db.prepare("SELECT count(*) n FROM posts").get().n, 1);
     assert.equal(f.db.prepare("SELECT count(*) n FROM ai_messages").get().n, 1);
-    f.db
-      .prepare("INSERT INTO ai_roles VALUES(?,?)")
-      .run(
-        "new-role",
-        JSON.stringify({
-          id: "new-role",
-          wiki: "艾莲·乔",
-          sourceProvider: "moegirl",
-        }),
-      );
+    f.db.prepare("INSERT INTO ai_roles VALUES(?,?)").run(
+      "new-role",
+      JSON.stringify({
+        id: "new-role",
+        wiki: "艾莲·乔",
+        sourceProvider: "moegirl",
+      }),
+    );
     upgraded.close();
     upgraded = createResidentAI(f.db, { admin, dataDir: f.dir, env: {} });
     assert.equal(f.db.prepare("SELECT count(*) n FROM ai_roles").get().n, 1);
@@ -1095,7 +1095,10 @@ test("anonymous Moegirl API denial falls back only to public pages and checks ar
     result.items.map((r) => r.wiki),
     ["艾莲·乔"],
   );
-  assert.equal(requests.length, 4);
+  // Category API, public category, navbox, one denied API probe, then the
+  // public page for each candidate (the denied API is memoized per fetcher).
+  assert.equal(requests.length, 6);
+  assert.ok(result.diagnostics.categoryOk);
 });
 
 test("full Moegirl pipeline discovers and generates every verified character, not organisations, without automatic approval", async () => {
@@ -1183,6 +1186,313 @@ test("full Moegirl pipeline discovers and generates every verified character, no
       ),
     );
   } finally {
+    ai?.close();
+    f.close();
+  }
+});
+
+test("article falls back to the public page when the anonymous Moegirl API returns HTTP 403", async () => {
+  const calls = [];
+  const wiki = await fetchWiki(
+    { wiki: "艾莲·乔" },
+    {
+      fetcher: async (raw) => {
+        const u = new URL(raw);
+        calls.push(decodeURIComponent(u.pathname));
+        if (u.pathname === "/api.php")
+          return new Response("forbidden", { status: 403 });
+        return new Response(
+          `<h1 id="firstHeading">艾莲·乔</h1><div class="mw-parser-output"><img class="infobox" src="https://storage.moegirl.org.cn/role.png"><p>${"艾莲·乔是《绝区零》的登场角色，维多利亚家政成员。".repeat(40)}</p></div>`,
+        );
+      },
+    },
+  );
+  assert.match(wiki.text, /维多利亚家政/);
+  assert.equal(wiki.sources[0].access, "anonymous-public-page");
+  // The denied API is probed once per fetcher and then memoized for 30 min;
+  // here all four attempts belong to that single probe.
+  assert.equal(calls.filter((p) => p === "/api.php").length, 4);
+  assert.equal(calls.filter((p) => p === "/艾莲·乔").length, 1);
+});
+
+test("Moegirl 403 is retried with backoff instead of failing the first page", async () => {
+  let publicCalls = 0;
+  const wiki = await fetchWiki(
+    { wiki: "艾莲·乔" },
+    {
+      fetcher: async (raw) => {
+        const u = new URL(raw);
+        if (u.pathname === "/api.php")
+          return new Response("blocked", { status: 403 });
+        publicCalls++;
+        if (publicCalls < 2) return new Response("blocked", { status: 403 });
+        return new Response(
+          `<h1 id="firstHeading">艾莲·乔</h1><div class="mw-parser-output"><p>${"艾莲·乔是《绝区零》的登场角色。".repeat(60)}</p></div>`,
+        );
+      },
+    },
+  );
+  assert.equal(publicCalls, 2);
+  assert.match(wiki.text, /登场角色/);
+});
+
+test("persistent Moegirl 403 is reported as a retryable source error, never as success", async () => {
+  await assert.rejects(
+    fetchWiki(
+      { wiki: "艾莲·乔" },
+      {
+        fetcher: async () => new Response("blocked", { status: 403 }),
+      },
+    ),
+    (e) =>
+      e.status === 502 && /萌娘百科/.test(e.message) && /重试/.test(e.message),
+  );
+});
+
+test("discovery keeps validated roles when single pages fail and never calls that truncation", async () => {
+  const result = await discoverWikiCharacters({
+    fetcher: async (raw) => {
+      const u = new URL(raw);
+      if (u.searchParams.get("action") === "query")
+        return Response.json({
+          query: {
+            categorymembers: [
+              { ns: 0, title: "艾莲·乔" },
+              { ns: 0, title: "坏页面" },
+            ],
+          },
+        });
+      if (decodeURIComponent(u.pathname) === "/Template:绝区零")
+        return new Response(
+          '<table class="navbox"><tr><td>组织</td><td><a title="艾莲·乔">艾莲</a></td></tr></table>',
+        );
+      const page = u.searchParams.get("page");
+      if (page === "坏页面") return new Response("blocked", { status: 403 });
+      return Response.json({
+        parse: {
+          title: page,
+          revid: 1,
+          text: {
+            "*": `<p>${page} 是《绝区零》的登场角色。</p><p>${"资料".repeat(900)}</p>`,
+          },
+        },
+      });
+    },
+  });
+  assert.deepEqual(
+    result.items.map((r) => r.wiki),
+    ["艾莲·乔"],
+  );
+  assert.equal(result.truncated, false);
+  assert.equal(result.pageFailures, 1);
+  assert.equal(result.complete, false);
+  assert.equal(result.diagnostics.navboxOk, true);
+});
+
+test("dossier uses a bounded excerpt, skips completed roles and repairs invalid JSON once", async () => {
+  const f = fixture();
+  let ai;
+  try {
+    f.ai.close();
+    f.db.prepare("DELETE FROM ai_roles").run();
+    const bodies = [];
+    let calls = 0;
+    ai = createResidentAI(f.db, {
+      admin: { isAdmin: (u) => u.id === "admin", banned: () => false },
+      dataDir: f.dir,
+      env: {},
+      fetcher: async (url, options) => {
+        bodies.push(JSON.parse(options.body));
+        calls++;
+        if (calls === 1)
+          return Response.json({
+            choices: [
+              {
+                message: { content: JSON.stringify({ identity: "太短" }) },
+                finish_reason: "stop",
+              },
+            ],
+          });
+        return Response.json({
+          choices: [
+            {
+              message: { content: JSON.stringify(dossier) },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      },
+    });
+    const now = new Date().toISOString();
+    const row = (id, extra) =>
+      f.db.prepare("INSERT INTO ai_roles VALUES(?,?)").run(
+        id,
+        JSON.stringify({
+          id,
+          wiki: id,
+          name: id,
+          kind: "agent",
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [
+            {
+              url: "https://zh.moegirl.org.cn/" + id,
+              revision: 1,
+              fetchedAt: now,
+              sha256: "x".repeat(64),
+              verification: "server-fetched",
+            },
+          ],
+          sourceStatus: "imported",
+          sourceText: "资料".repeat(45000),
+          version: 1,
+          avatarUrl: "",
+          ...extra,
+        }),
+      );
+    row("done-role", { dossier });
+    row("missing-role", {});
+    const call = async (path, method = "GET", data = {}) => {
+      let result;
+      await ai.handler({
+        path,
+        url: new URL(path, "http://test"),
+        req: { method },
+        auth: () => ({ id: "admin" }),
+        body: async () => data,
+        reply: (r) => (result = r),
+      });
+      return result;
+    };
+    await call("/v1/admin/ai/config", "PATCH", {
+      enabled: true,
+      baseUrl: "https://new-api.example/v1",
+      model: "test",
+      apiKey: "secret",
+    });
+    const job = await call("/v1/admin/ai/full-sync", "POST", {
+      clientId: "resume",
+      discover: false,
+    });
+    let done;
+    for (let i = 0; i < 100; i++) {
+      done = await call("/v1/ai/jobs/" + job.id);
+      if (["done", "failed"].includes(done.state)) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.equal(done.state, "done", JSON.stringify(done.error || done.result));
+    assert.equal(done.result.alreadyComplete, 1);
+    assert.equal(done.result.total, 1);
+    assert.equal(done.result.generated, 1);
+    assert.equal(done.result.failed, 0);
+    assert.equal(calls, 2, "one invalid draft plus one repair call");
+    assert.ok(
+      JSON.stringify(bodies[0].messages).length < 60000,
+      "prompt must not contain the whole 90k source",
+    );
+    assert.match(bodies[1].messages[0].content, /不合格/);
+  } finally {
+    ai?.close();
+    f.close();
+  }
+});
+
+test("repeated source failures pause the pipeline instead of burning through every role", async () => {
+  const f = fixture();
+  const old = process.env.AI_WIKI_ATTEMPTS;
+  process.env.AI_WIKI_ATTEMPTS = "1";
+  let ai;
+  try {
+    f.ai.close();
+    f.db.prepare("DELETE FROM ai_roles").run();
+    const names = ["角色甲", "角色乙", "角色丙", "角色丁", "角色戊", "角色己"];
+    const now = new Date().toISOString();
+    for (const name of names)
+      f.db.prepare("INSERT INTO ai_roles VALUES(?,?)").run(
+        name,
+        JSON.stringify({
+          id: name,
+          wiki: name,
+          name,
+          kind: "agent",
+          enabled: false,
+          approved: false,
+          dossier: null,
+          sources: [],
+          sourceStatus: "imported",
+          sourceText: "资料".repeat(900),
+          version: 1,
+          avatarUrl: "",
+        }),
+      );
+    ai = createResidentAI(f.db, {
+      admin: { isAdmin: () => true, banned: () => false },
+      dataDir: f.dir,
+      env: {},
+      fetcher: async () => new Response("blocked", { status: 403 }),
+      wikiFetcher: async (raw) => {
+        const u = new URL(raw);
+        if (u.searchParams.get("action") === "query")
+          return Response.json({
+            query: {
+              categorymembers: names.map((title) => ({ ns: 0, title })),
+            },
+          });
+        if (decodeURIComponent(u.pathname) === "/Template:绝区零")
+          return new Response(
+            names
+              .map(
+                (n) => `<tr><td>组</td><td><a title="${n}">${n}</a></td></tr>`,
+              )
+              .join(""),
+          );
+        return Response.json({
+          parse: {
+            title: u.searchParams.get("page"),
+            revid: 1,
+            text: {
+              "*": `<p>${u.searchParams.get("page")} 是《绝区零》的登场角色。</p>`,
+            },
+          },
+        });
+      },
+    });
+    const call = async (path, method = "GET", data = {}) => {
+      let result;
+      await ai.handler({
+        path,
+        url: new URL(path, "http://test"),
+        req: { method },
+        auth: () => ({ id: "admin" }),
+        body: async () => data,
+        reply: (r) => (result = r),
+      });
+      return result;
+    };
+    await call("/v1/admin/ai/config", "PATCH", {
+      enabled: true,
+      baseUrl: "https://new-api.example/v1",
+      model: "test",
+      apiKey: "secret",
+    });
+    const job = await call("/v1/admin/ai/full-sync", "POST", {
+      clientId: "pause-on-403",
+    });
+    let done;
+    for (let i = 0; i < 100; i++) {
+      done = await call("/v1/ai/jobs/" + job.id);
+      if (["done", "failed"].includes(done.state)) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.equal(done.state, "done");
+    assert.equal(done.result.stoppedEarly, true);
+    assert.equal(done.result.failed, 5);
+    assert.equal(done.result.remaining.length, 1);
+    assert.equal(done.result.complete, false);
+  } finally {
+    if (old === undefined) delete process.env.AI_WIKI_ATTEMPTS;
+    else process.env.AI_WIKI_ATTEMPTS = old;
     ai?.close();
     f.close();
   }

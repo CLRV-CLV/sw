@@ -165,8 +165,16 @@ export function createProvider(
   }
   async function complete(
     messages,
-    { maxTokens = 1800, json = true, allowDisabled = false } = {},
+    {
+      maxTokens = 1800,
+      json = true,
+      allowDisabled = false,
+      timeoutMs = 120000,
+      temperature = 0.55,
+      retries = 0,
+    } = {},
   ) {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
     const c = config();
     if ((!c.enabled && !allowDisabled) || !c.baseUrl || !c.model)
       throw fail(503, "驻站AI尚未配置或未启用");
@@ -193,43 +201,54 @@ export function createProvider(
     const endpoint = /\/chat\/completions$/.test(base)
       ? base
       : base.replace(/\/v1$/, "") + "/v1/chat/completions";
-    let response;
-    try {
-      response = await fetcher(endpoint, {
-        method: "POST",
-        redirect: "error",
-        signal: AbortSignal.timeout(60000),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: c.model,
-          messages,
-          stream: false,
-          temperature: 0.55,
-          max_tokens: maxTokens,
-          ...(json && c.jsonMode
-            ? { response_format: { type: "json_object" } }
-            : {}),
-        }),
-      });
-    } catch (e) {
-      const code = e?.cause?.code || e?.code;
-      const reason =
-        e?.name === "TimeoutError"
-          ? "请求超过60秒"
-          : {
-              ENOTFOUND: "DNS域名解析失败",
-              ECONNREFUSED: "目标拒绝连接",
-              ECONNRESET: "连接被重置",
-              CERT_HAS_EXPIRED: "证书已过期",
-              UNABLE_TO_VERIFY_LEAF_SIGNATURE: "证书链验证失败",
-              DEPTH_ZERO_SELF_SIGNED_CERT: "不受信任的自签名证书",
-              UND_ERR_CONNECT_TIMEOUT: "连接超时",
-            }[code] || "网络连接失败（检查服务器出站、TLS及代理设置）";
-      throw fail(502, "AI服务：" + reason);
+    let response,
+      timedOut = false;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      timedOut = false;
+      try {
+        response = await fetcher(endpoint, {
+          method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(timeoutMs),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: c.model,
+            messages,
+            stream: false,
+            temperature,
+            max_tokens: maxTokens,
+            ...(json && c.jsonMode
+              ? { response_format: { type: "json_object" } }
+              : {}),
+          }),
+        });
+        break;
+      } catch (e) {
+        if (e?.name === "TimeoutError" && attempt < retries) {
+          timedOut = true;
+          continue;
+        }
+        const code = e?.cause?.code || e?.code;
+        const reason =
+          e?.name === "TimeoutError"
+            ? `请求超过${seconds}秒`
+            : {
+                ENOTFOUND: "DNS域名解析失败",
+                ECONNREFUSED: "目标拒绝连接",
+                ECONNRESET: "连接被重置",
+                CERT_HAS_EXPIRED: "证书已过期",
+                UNABLE_TO_VERIFY_LEAF_SIGNATURE: "证书链验证失败",
+                DEPTH_ZERO_SELF_SIGNED_CERT: "不受信任的自签名证书",
+                UND_ERR_CONNECT_TIMEOUT: "连接超时",
+              }[code] || "网络连接失败（检查服务器出站、TLS及代理设置）";
+        throw fail(502, "AI服务：" + reason);
+      }
     }
+    if (timedOut) throw fail(502, `AI服务：请求超过${seconds}秒`);
+    if (!response) throw fail(502, "AI服务：未获得响应");
     if (!response.ok) {
       response.body?.cancel?.().catch(() => {});
       const hints = {

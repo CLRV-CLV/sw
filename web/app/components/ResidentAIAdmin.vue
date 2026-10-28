@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { selectRoleResults } from "~/utils/role-selection";
+import { groupSyncFailures, syncVerdict } from "~/utils/sync-report";
 interface Role {
   id: string;
   name: string;
@@ -37,6 +38,16 @@ interface Job {
     message?: string;
     added?: number;
     removed?: string[];
+    catalog?: number;
+    total?: number;
+    imported?: number;
+    generated?: number;
+    failed?: number;
+    alreadyComplete?: number;
+    stoppedEarly?: boolean;
+    complete?: boolean;
+    remaining?: { roleId: string; name: string }[];
+    errors?: { roleId: string; name: string; error: string }[];
     [key: string]: unknown;
   };
 }
@@ -356,19 +367,42 @@ async function refreshAvatar() {
     });
   });
 }
-async function fullSync() {
+const lastFullSync = computed(
+  () => jobs.value.find((j) => j.kind === "full-sync" && j.result) || null,
+);
+const syncFailures = computed(() =>
+  groupSyncFailures(lastFullSync.value?.result?.errors),
+);
+const syncStatus = computed(() => syncVerdict(lastFullSync.value?.result));
+async function retryPending() {
   if (
     !confirm(
-      "从萌娘百科发现全角色并逐个抓取原文、调用模型概括为角色提示词资料。可能产生较多模型费用，可随时中断；完成后仍需审核启用。继续？",
+      "不再重新发现目录，只对尚未生成、上次失败的角色重试；已生成的角色不会重复调用模型。继续？",
     )
   )
     return;
   await act(async () => {
     await $fetch("/v1/admin/ai/full-sync", {
       method: "POST",
-      body: { clientId: crypto.randomUUID() },
+      body: { clientId: crypto.randomUUID(), discover: false },
     });
-    notice.value = "全角色流水线已入队，按真实抓取结果生成，不会伪造缺失资料。";
+    notice.value = "已入队：只重试未完成角色，不再抓取目录。";
+  });
+}
+async function fullSync(discover = true) {
+  if (
+    !confirm(
+      "从萌娘百科发现全角色，并只为尚未生成的角色抓取原文、调用模型概括提示词。已生成的角色自动跳过，不会重复消耗模型费用；可随时中断，源站连续拒绝时会自动暂停以免触发风控。完成后仍需审核启用。继续？",
+    )
+  )
+    return;
+  await act(async () => {
+    await $fetch("/v1/admin/ai/full-sync", {
+      method: "POST",
+      body: { clientId: crypto.randomUUID(), discover: discover },
+    });
+    notice.value =
+      "流水线已入队：已生成角色自动跳过，按真实抓取结果生成，不会伪造缺失资料。";
   });
 }
 async function cancelJob(id: string) {
@@ -555,8 +589,36 @@ onBeforeUnmount(() => {
       <p>
         本次升级已一次性强制清理旧Wiki角色目录，重新使用萌娘百科。全角色来源抓取→AI概括→资料审核→启用；缺失或被源站拒绝的页面明确报错，不伪造完成。
       </p>
-      <IkActionButton :disabled="busy" @click="fullSync"
-        >全角色导入并生成提示词（消耗模型额度）</IkActionButton
+      <p>
+        目录会同时读取“分类:绝区零”和页面上的“登场角色”导航模板，逐页核对正文后才算角色，组织/音乐/邦布不会混入。已生成的档案自动跳过；失败项直接再次运行即可只重试未完成角色。
+      </p>
+      <p
+        v-if="lastFullSync?.result"
+        class="sync-summary"
+        :data-tone="syncStatus.tone"
+      >
+        上次结果：目录 {{ lastFullSync.result.catalog }} 项 · 已完整跳过
+        {{ lastFullSync.result.alreadyComplete }} · 本次待处理
+        {{ lastFullSync.result.total }} · 已导入
+        {{ lastFullSync.result.imported }} · 已生成
+        {{ lastFullSync.result.generated }} · 失败
+        {{ lastFullSync.result.failed }}。
+        {{ syncStatus.text }}
+      </p>
+      <div v-if="syncFailures.length" class="sync-failures">
+        <p>失败原因分组（再次运行只重试这些角色）：</p>
+        <ul>
+          <li v-for="group in syncFailures" :key="group.error">
+            <b>{{ group.error }}</b> × {{ group.names.length }}：{{
+              group.names.join("、")
+            }}
+          </li>
+        </ul>
+      </div>
+      <IkActionButton :disabled="busy" @click="fullSync(true)"
+        >发现并生成未完成角色（已生成自动跳过）</IkActionButton
+      ><IkActionButton :disabled="busy" @click="retryPending"
+        >只重试未完成角色（不再发现目录）</IkActionButton
       >
       <label
         ><input
@@ -907,6 +969,24 @@ onBeforeUnmount(() => {
   </div>
 </template>
 <style scoped>
+.sync-summary {
+  border-left: 4px solid #d7fa00;
+  padding-left: 12px;
+}
+.sync-failures {
+  border: 1px solid #7a4a32;
+  background: #2a1d16;
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.sync-failures ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.sync-failures li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
 .role-selection-tools {
   display: flex;
   flex-wrap: wrap;

@@ -19,6 +19,23 @@ export const dossierFields = [
   "dailyLife",
   "knowledgeBoundaries",
 ];
+export function dossierProblems(d) {
+  if (!d || typeof d !== "object" || Array.isArray(d))
+    return ["没有返回JSON对象"];
+  const problems = [];
+  const extra = Object.keys(d).filter((k) => !dossierFields.includes(k));
+  if (extra.length) problems.push(`出现多余字段 ${extra.join("、")}`);
+  for (const k of dossierFields) {
+    if (typeof d[k] !== "string") problems.push(`字段 ${k} 不是字符串`);
+    else if (d[k].length < 40)
+      problems.push(`字段 ${k} 过短（${d[k].length}字符）`);
+    else if (d[k].length > 4000) problems.push(`字段 ${k} 过长`);
+  }
+  const size = JSON.stringify(d).length;
+  if (size < 1600) problems.push(`整体仅 ${size} 字符，至少需要1600`);
+  if (size > 24000) problems.push("整体超过24000字符");
+  return problems;
+}
 export function validDossier(d) {
   return (
     d &&
