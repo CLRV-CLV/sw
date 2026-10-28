@@ -46,6 +46,7 @@ interface Job {
     alreadyComplete?: number;
     stoppedEarly?: boolean;
     complete?: boolean;
+    discovery?: { complete?: boolean; error?: string };
     remaining?: { roleId: string; name: string }[];
     errors?: { roleId: string; name: string; error: string }[];
     [key: string]: unknown;
@@ -590,7 +591,7 @@ onBeforeUnmount(() => {
         本次升级已一次性强制清理旧Wiki角色目录，重新使用萌娘百科。全角色来源抓取→AI概括→资料审核→启用；缺失或被源站拒绝的页面明确报错，不伪造完成。
       </p>
       <p>
-        目录会同时读取“分类:绝区零”和页面上的“登场角色”导航模板，逐页核对正文后才算角色，组织/音乐/邦布不会混入。已生成的档案自动跳过；失败项直接再次运行即可只重试未完成角色。
+        先加入用户提供的65个角色及其阵营作为待核验目录，再读取百科分类和导航模板补充角色；阵营不会作为角色导入。目录条目不代表百科资料已抓取或档案已生成，部分名称对应的百科页面仍需核对。已生成的档案自动跳过。
       </p>
       <p
         v-if="lastFullSync?.result"
@@ -605,6 +606,7 @@ onBeforeUnmount(() => {
         {{ lastFullSync.result.failed }}。
         {{ syncStatus.text }}
       </p>
+      <p v-if="lastFullSync?.result?.discovery?.error">百科目录发现失败：{{ lastFullSync.result.discovery.error }}。名单已保留，可稍后重新发现。</p>
       <div v-if="syncFailures.length" class="sync-failures">
         <p>失败原因分组（再次运行只重试这些角色）：</p>
         <ul>

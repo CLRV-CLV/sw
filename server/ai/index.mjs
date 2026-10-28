@@ -9,6 +9,7 @@ import {
   wikiOrigin,
 } from "./wiki.mjs";
 import { roster } from "./roster.mjs";
+import { curatedCast } from "./curated-cast.mjs";
 const dossierExcerpt = (text, limit = 24000) => {
   const source = String(text || "");
   if (source.length <= limit) return source;
@@ -176,7 +177,8 @@ export function createResidentAI(
       !r.sourceText &&
       !(r.sources || []).length &&
       !r.avatarUrl &&
-      !roster.some((known) => wikiIdentity(known.wiki) === wikiIdentity(r.wiki))
+      !roster.some((known) => wikiIdentity(known.wiki) === wikiIdentity(r.wiki)) &&
+      !curatedCast.some((known) => wikiIdentity(known.wiki) === wikiIdentity(r.wiki))
     );
   }
   const configured = () => {
@@ -313,8 +315,33 @@ export function createResidentAI(
     const data = JSON.parse(job.data);
     canRun(job);
     if (job.kind === "full-sync") {
-      const discovery =
-        data.discover === false ? null : await run({ ...job, kind: "catalog" });
+      let discovery = null;
+      if (data.discover !== false) {
+        // Seed independently of network availability; never restore deleted roles.
+        transaction(() => {
+          const rows = db.prepare("SELECT data FROM ai_roles").all().map(row => JSON.parse(row.data));
+          for (const item of curatedCast) {
+            const existing = rows.find(r => wikiIdentity(r.wiki) === wikiIdentity(item.wiki) || wikiIdentity(r.name) === wikiIdentity(item.name));
+            if (existing) {
+              if (!existing.deleted && existing.faction !== item.faction) {
+                existing.faction = item.faction;
+                db.prepare("UPDATE ai_roles SET data=? WHERE id=?").run(JSON.stringify(existing), existing.id);
+              }
+              continue;
+            }
+            if (rows.filter(r => !r.deleted).length >= 2000) break;
+            const role = { ...item, id: "wiki-" + createHash("sha256").update(item.wiki).digest("hex").slice(0, 24), enabled: false, approved: false, dossier: null, sources: [], sourceStatus: "pending", version: 1, avatarUrl: "" };
+            db.prepare("INSERT OR IGNORE INTO ai_roles VALUES(?,?)").run(role.id, JSON.stringify(role));
+            rows.push(role);
+          }
+        });
+        try {
+          discovery = await run({ ...job, kind: "catalog" });
+        } catch (e) {
+          canRun(job);
+          discovery = { complete: false, error: e.message || "目录发现失败" };
+        }
+      }
       const catalog = list().map((r) => get(r.id)),
         pending = catalog.filter((r) => !validDossier(r.dossier)),
         progress = {
@@ -380,6 +407,7 @@ export function createResidentAI(
               pageFailures: discovery.pageFailures,
               skippedNonCharacter: discovery.skippedNonCharacter,
               diagnostics: discovery.diagnostics,
+              error: discovery.error,
             }
           : null,
         complete:

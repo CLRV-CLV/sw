@@ -1,4 +1,5 @@
 import { roster } from "./roster.mjs";
+import { curatedCast } from "./curated-cast.mjs";
 const normalize = (s) =>
   String(s || "")
     .normalize("NFKC")
@@ -19,6 +20,11 @@ for (const [a, b] of [
   ["Rina", "Alexandrina Sebastiane"],
 ])
   aliases.set(normalize(a), normalize(b));
+for (const item of curatedCast) {
+  const canonical = aliases.get(normalize(item.wiki)) || normalize(item.wiki);
+  aliases.set(normalize(item.name), canonical);
+  aliases.set(normalize(item.wiki), canonical);
+}
 export function wikiIdentity(value) {
   let s = String(value || "");
   try {

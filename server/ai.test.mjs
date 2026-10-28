@@ -8,6 +8,7 @@ import { createAdmin } from "./admin.mjs";
 import { createProvider } from "./ai/provider.mjs";
 import { dossierFields, refusal } from "./ai/policy.mjs";
 import { roster } from "./ai/roster.mjs";
+import { curatedCast } from "./ai/curated-cast.mjs";
 import {
   cleanWiki,
   fetchWiki,
@@ -1171,11 +1172,14 @@ test("full Moegirl pipeline discovers and generates every verified character, no
       await new Promise((r) => setTimeout(r, 5));
     }
     assert.equal(done.state, "done");
-    assert.equal(done.result.total, 2);
-    assert.equal(done.result.generated, 2);
+    assert.equal(done.result.total, curatedCast.length + 1);
+    assert.equal(done.result.generated, curatedCast.length + 1);
     assert.equal(done.result.allGenerated, true);
     const roles = (await call("/v1/admin/ai/roles")).items;
-    assert.equal(roles.length, 2);
+    assert.equal(roles.length, curatedCast.length + 1);
+    assert.equal(roles.find(r => r.name === "Fairy（仙灵）").faction, "“钥匙”");
+    assert.equal(roles.find(r => r.name === "知更鸟").faction, "未明界域");
+    assert.ok(!roles.some(r => r.name === "达识结社"));
     assert.ok(
       roles.every(
         (r) =>
@@ -1488,7 +1492,7 @@ test("repeated source failures pause the pipeline instead of burning through eve
     assert.equal(done.state, "done");
     assert.equal(done.result.stoppedEarly, true);
     assert.equal(done.result.failed, 5);
-    assert.equal(done.result.remaining.length, 1);
+    assert.equal(done.result.remaining.length, done.result.total - 5);
     assert.equal(done.result.complete, false);
   } finally {
     if (old === undefined) delete process.env.AI_WIKI_ATTEMPTS;
